@@ -16,18 +16,43 @@ from .core.pic_command import PicGenerationCommand, PicConfigCommand, PicStyleCo
 from .core.config_manager import EnhancedConfigManager
 
 
+def _discover_llm_slot_choices() -> List[str]:
+    """尽量从主程序读取可用模型槽位，失败时回退默认列表。"""
+    defaults = [
+        "replyer",
+        "utils",
+        "tool_use",
+        "planner",
+        "planer",
+        "vlm",
+        "lpmm_entity_extract",
+        "lpmm_rdf_build",
+        "lpmm_qa",
+    ]
+    try:
+        from src.plugin_system.apis import llm_api
+        models = llm_api.get_available_models()
+        if isinstance(models, dict) and models:
+            merged = list(dict.fromkeys(list(models.keys()) + defaults))
+            return merged
+    except Exception:
+        pass
+    return defaults
+
+
 @register_plugin
 class CustomPicPlugin(BasePlugin):
     """统一的多模型图片生成插件，支持文生图和图生图"""
 
     # 插件基本信息
     plugin_name = "custom_pic_plugin"
-    plugin_version = "3.3.3"
+    plugin_version = "3.3.5"
     plugin_author = "Ptrel，Rabbit"
     enable_plugin = True
     dependencies: List[str] = []
     python_dependencies: List[str] = []
     config_file_name = "config.toml"
+    llm_slot_choices = _discover_llm_slot_choices()
 
     # 配置节元数据
     config_section_descriptions = {
@@ -160,7 +185,7 @@ class CustomPicPlugin(BasePlugin):
             ),
             "config_version": ConfigField(
                 type=str,
-                default="3.3.3",
+                default="3.3.5",
                 description="插件配置版本号",
                 disabled=True,
                 order=2
@@ -345,7 +370,7 @@ class CustomPicPlugin(BasePlugin):
             "reference_image_path": ConfigField(
                 type=str,
                 default="",
-                description="自拍参考图片路径（相对于插件目录或绝对路径）。配置后自动使用图生图模式，留空则使用纯文生图。若模型不支持图生图会自动回退",
+                description="自拍底图路径（相对于插件目录或绝对路径）。用于保持人物一致性。开启强制底图时必须配置",
                 placeholder="images/reference.png",
                 depends_on="selfie.enabled",
                 depends_value=True,
@@ -361,6 +386,83 @@ class CustomPicPlugin(BasePlugin):
                 depends_on="selfie.enabled",
                 depends_value=True,
                 order=3
+            ),
+            "require_base_image": ConfigField(
+                type=bool,
+                default=True,
+                description="是否强制自拍生图必须使用底图。开启后未配置底图或模型不支持图生图时将拒绝生成",
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=4
+            ),
+            "strict_audit_enabled": ConfigField(
+                type=bool,
+                default=True,
+                description="是否开启严格自拍审核。开启后仅在明确索要麦麦本人照片时触发自拍生图",
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=5
+            ),
+            "audit_model_name": ConfigField(
+                type=str,
+                default="planner",
+                description="自拍审核使用的主程序模型槽位（下拉选择）",
+                choices=llm_slot_choices,
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=6
+            ),
+            "audit_with_planer": ConfigField(
+                type=bool,
+                default=True,
+                description="是否启用自拍审核模型判定（推荐开启）",
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=7
+            ),
+            "audit_with_replyer": ConfigField(
+                type=bool,
+                default=True,
+                description="兼容旧配置：当审核模型不可用时是否允许回退到 replyer",
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=8
+            ),
+            "scene_prompt_model_name": ConfigField(
+                type=str,
+                default="replyer",
+                description="自拍场景提示词使用的主程序模型槽位（下拉选择）",
+                choices=llm_slot_choices,
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=9
+            ),
+            "use_replyer_scene_prompt": ConfigField(
+                type=bool,
+                default=True,
+                description="是否启用自拍场景提示词模型（按上方槽位生成）",
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=10
+            ),
+            "bot_aliases": ConfigField(
+                type=str,
+                default="麦麦,maimai,mai",
+                description="兼容预留：机器人别名列表（当前审核优先走 planer/planner 判定）",
+                placeholder="麦麦,maimai,mai",
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=11
+            ),
+            "scene_context_limit": ConfigField(
+                type=int,
+                default=12,
+                description="生成自拍场景提示词时读取的最近聊天消息条数（3-30）",
+                min=3,
+                max=30,
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=12
             )
         },
         "auto_recall": {
@@ -520,6 +622,7 @@ class CustomPicPlugin(BasePlugin):
     def __init__(self, plugin_dir: str):
         """初始化插件，集成增强配置管理器"""
         import toml
+        self._refresh_llm_slot_choices()
         # 在父类初始化前读取原始配置文件
         config_path = os.path.join(plugin_dir, self.config_file_name)
         original_config = None
@@ -539,6 +642,17 @@ class CustomPicPlugin(BasePlugin):
         
         # 检查并更新配置（如果需要），传入原始配置
         self._enhance_config_management(original_config)
+
+    @classmethod
+    def _refresh_llm_slot_choices(cls):
+        """刷新自拍审核/场景提示词的模型槽位下拉选项。"""
+        choices = _discover_llm_slot_choices()
+        cls.llm_slot_choices = choices
+        selfie_schema = cls.config_schema.get("selfie", {})
+        for key in ("audit_model_name", "scene_prompt_model_name"):
+            field = selfie_schema.get(key)
+            if isinstance(field, ConfigField):
+                field.choices = choices
     
     def _enhance_config_management(self, original_config=None):
         """增强配置管理：备份、版本检查、智能合并

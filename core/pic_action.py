@@ -2,6 +2,7 @@ import asyncio
 import traceback
 import base64
 import os
+import re
 from typing import List, Tuple, Type, Optional, Dict, Any
 
 from src.plugin_system.base.base_action import BaseAction
@@ -13,7 +14,7 @@ from .image_utils import ImageProcessor
 from .cache_manager import CacheManager
 from .size_utils import validate_image_size, get_image_size
 from .runtime_state import runtime_state
-from .prompt_optimizer import optimize_prompt
+from .prompt_optimizer import optimize_prompt, generate_selfie_scene_prompt, audit_selfie_request
 
 logger = get_logger("pic_action")
 
@@ -44,7 +45,7 @@ class Custom_Pic_Action(BaseAction):
         "改成", "换成", "变成", "转换成", "风格", "画风", "改风格", "换风格",
         "这张图", "这个图", "图片风格", "改画风", "重新画", "再画", "重做",
         # 自拍关键词
-        "自拍", "selfie", "拍照", "对镜自拍", "镜子自拍", "照镜子"
+        "自拍", "selfie", "拍照", "照片", "相片", "来张自拍", "来张照片", "发张照片", "对镜自拍", "镜子自拍", "照镜子"
     ]
 
     # LLM判定提示词（用于Focus模式）
@@ -65,9 +66,14 @@ class Custom_Pic_Action(BaseAction):
 4. 用户要求在现有图片基础上添加或删除元素
 
 **自拍场景：**
-1. 用户明确要求你进行自拍、拍照等
+1. 用户明确要求你（麦麦本人）进行自拍、拍照、发照片等
 2. 用户提到"自拍"、"selfie"、"照镜子"、"对镜自拍"等关键词
-3. 用户想要看到你的照片或形象
+3. 用户想要看到你的照片或形象，目标对象明确是你本人
+
+**自拍审核要求（必须同时满足）：**
+1. 请求里明确是向你本人要照片（例如提到“麦麦”“你”“你的”）
+2. 是明确索要自拍/照片，不是泛泛讨论照片
+3. 不是让你去要其他人的照片，也不是让群友发照片
 
 **绝对不要使用的情况：**
 1. 纯文字聊天和问答
@@ -131,13 +137,18 @@ class Custom_Pic_Action(BaseAction):
             return False, "插件已禁用"
 
         # 获取参数
-        description = self.action_data.get("description", "").strip()
-        model_id = self.action_data.get("model_id", "").strip()
+        description = str(self.action_data.get("description", "") or "").strip()
+        model_id = str(self.action_data.get("model_id", "") or "").strip()
         strength = self.action_data.get("strength", 0.7)
-        size = self.action_data.get("size", "").strip()
-        selfie_mode = self.action_data.get("selfie_mode", False)
-        selfie_style = self.action_data.get("selfie_style", "standard").strip().lower()
-        free_hand_action = self.action_data.get("free_hand_action", "").strip()
+        size = str(self.action_data.get("size", "") or "").strip()
+        selfie_mode_raw = self.action_data.get("selfie_mode", False)
+        if isinstance(selfie_mode_raw, str):
+            selfie_mode = selfie_mode_raw.strip().lower() in {"true", "1", "yes", "on"}
+        else:
+            selfie_mode = bool(selfie_mode_raw)
+        selfie_style = str(self.action_data.get("selfie_style", "standard")).strip().lower()
+        free_hand_action = str(self.action_data.get("free_hand_action", "")).strip()
+        message_text = self._get_current_message_text()
 
         # 如果没有指定模型，使用运行时状态的默认模型
         if not model_id:
@@ -167,17 +178,6 @@ class Custom_Pic_Action(BaseAction):
             description = description[:1000]
             logger.info(f"{self.log_prefix} 图片描述过长，已截断至1000字符")
 
-        # 提示词优化
-        optimizer_enabled = self.get_config("prompt_optimizer.enabled", True)
-        if optimizer_enabled:
-            logger.info(f"{self.log_prefix} 开始优化提示词: {description[:50]}...")
-            success, optimized_prompt = await optimize_prompt(description, self.log_prefix)
-            if success:
-                logger.info(f"{self.log_prefix} 提示词优化完成: {optimized_prompt[:80]}...")
-                description = optimized_prompt
-            else:
-                logger.warning(f"{self.log_prefix} 提示词优化失败，使用原始描述: {description[:50]}...")
-
         # 验证strength参数
         try:
             strength = float(strength)
@@ -185,6 +185,17 @@ class Custom_Pic_Action(BaseAction):
                 strength = 0.7
         except (ValueError, TypeError):
             strength = 0.7
+
+        # 自拍模式审核：
+        # 1) 如果 action_data 已判定自拍，但文本审核不通过，则直接跳过，避免误触发
+        # 2) 如果 action_data 未判定自拍，但文本明确索要麦麦本人照片，则强制开启自拍模式
+        selfie_intent_passed = await self._audit_selfie_intent(message_text)
+        if selfie_mode and not selfie_intent_passed:
+            logger.info(f"{self.log_prefix} 自拍模式审核未通过，跳过本次自拍生图")
+            return False, "自拍审核未通过"
+        if not selfie_mode and selfie_intent_passed:
+            selfie_mode = True
+            logger.info(f"{self.log_prefix} 文本审核命中“麦麦自拍请求”，自动启用自拍模式")
 
         # 处理自拍模式
         if selfie_mode:
@@ -194,21 +205,41 @@ class Custom_Pic_Action(BaseAction):
                 await self.send_text("自拍功能暂未启用~")
                 return False, "自拍功能未启用"
 
+            # 先基于聊天情景生成自拍描述，再走自拍模板拼装
+            description = await self._build_selfie_description_with_scene(description, message_text)
             logger.info(f"{self.log_prefix} 启用自拍模式，风格: {selfie_style}")
             description = self._process_selfie_prompt(description, selfie_style, free_hand_action, model_id)
             logger.info(f"{self.log_prefix} 自拍模式处理后的提示词: {description[:100]}...")
 
-            # 检查是否配置了参考图片
+            # 自拍底图策略：默认强制使用底图，确保人物一致性
+            require_base_image = self.get_config("selfie.require_base_image", True)
             reference_image = self._get_selfie_reference_image()
+            if require_base_image and not reference_image:
+                await self.send_text("自拍底图未配置，无法执行自拍生图。请先设置 selfie.reference_image_path。")
+                return False, "自拍底图未配置"
+
+            # 自拍生图优先使用底图（图生图）
+            model_config = self._get_model_config(model_id)
             if reference_image:
-                # 检查模型是否支持图生图
-                model_config = self._get_model_config(model_id)
                 if model_config and model_config.get("support_img2img", True):
-                    logger.info(f"{self.log_prefix} 使用自拍参考图片进行图生图")
+                    logger.info(f"{self.log_prefix} 使用自拍底图进行图生图")
                     return await self._execute_unified_generation(description, model_id, size, strength or 0.6, reference_image)
-                else:
-                    logger.warning(f"{self.log_prefix} 模型 {model_id} 不支持图生图，自拍回退为文生图模式")
-            # 无参考图或模型不支持，继续使用文生图
+                await self.send_text(f"当前模型 {model_id} 不支持图生图，无法保持自拍人物一致性。")
+                return False, "模型不支持自拍底图图生图"
+            # 仅在非强制底图时允许回退
+            logger.warning(f"{self.log_prefix} 自拍未使用底图，回退文生图")
+            return await self._execute_unified_generation(description, model_id, size, None, None)
+
+        # 普通生图流程使用提示词优化
+        optimizer_enabled = self.get_config("prompt_optimizer.enabled", True)
+        if optimizer_enabled:
+            logger.info(f"{self.log_prefix} 开始优化提示词: {description[:50]}...")
+            success, optimized_prompt = await optimize_prompt(description, self.log_prefix)
+            if success:
+                logger.info(f"{self.log_prefix} 提示词优化完成: {optimized_prompt[:80]}...")
+                description = optimized_prompt
+            else:
+                logger.warning(f"{self.log_prefix} 提示词优化失败，使用原始描述: {description[:50]}...")
 
         # **智能检测：判断是文生图还是图生图**
         input_image_base64 = await self.image_processor.get_recent_image()
@@ -227,6 +258,155 @@ class Custom_Pic_Action(BaseAction):
         else:
             logger.info(f"{self.log_prefix} 未检测到输入图片，使用文生图模式")
             return await self._execute_unified_generation(description, model_id, size, None, None)
+
+    def _get_current_message_text(self) -> str:
+        """获取当前消息文本，兼容不同字段。"""
+        if not self.action_message:
+            return ""
+        return (
+            self.action_message.processed_plain_text
+            or self.action_message.display_message
+            or self.action_message.raw_message
+            or ""
+        ).strip()
+
+    def _rule_based_selfie_audit(self, message_text: str) -> bool:
+        """规则层预筛：只判定是否“可能是自拍请求”，目标归属交给 planer/planner。"""
+        text = (message_text or "").strip()
+        if not text:
+            return False
+        lowered = text.lower()
+
+        selfie_keywords = ["自拍", "selfie", "对镜自拍", "镜子自拍", "照镜子"]
+        photo_keywords = ["照片", "相片", "拍照", "照骗", "photo", "picture"]
+        request_keywords = [
+            "来张", "来一张", "发张", "发一张", "给我", "整一张", "拍一张", "拍张", "看看"
+        ]
+        deny_keywords = [
+            "不要自拍", "别自拍", "不用自拍", "别发照片", "不要照片"
+        ]
+
+        if not (any(k in lowered for k in selfie_keywords) or any(k in lowered for k in photo_keywords)):
+            return False
+        if any(k in lowered for k in deny_keywords):
+            return False
+
+        has_request_word = any(k in lowered for k in request_keywords)
+        has_request_pattern = bool(re.search(r"(来|发|给|拍|整).{0,3}(自拍|照片|相片|photo|picture)", lowered))
+        if not (has_request_word or has_request_pattern):
+            return False
+
+        return True
+
+    async def _audit_selfie_intent(self, message_text: str) -> bool:
+        """自拍审核总流程：规则预筛 + 主程序 planer/planner 判定对象是否为麦麦本人。"""
+        strict_audit = self.get_config("selfie.strict_audit_enabled", True)
+        if not strict_audit:
+            # 非严格模式下仅做关键词触发，不建议关闭
+            text = (message_text or "").lower()
+            return any(k in text for k in ["自拍", "照片", "拍照", "selfie", "photo"])
+
+        if not self._rule_based_selfie_audit(message_text):
+            return False
+
+        use_llm_audit = self.get_config("selfie.audit_with_planer", self.get_config("selfie.audit_with_replyer", True))
+        if not use_llm_audit:
+            return True
+
+        audit_model_name = str(self.get_config("selfie.audit_model_name", "planner") or "").strip()
+        allow_replyer_fallback = bool(self.get_config("selfie.audit_with_replyer", True))
+        context_text = await self._collect_recent_chat_context_for_selfie()
+        passed, raw = await audit_selfie_request(
+            message_text=message_text,
+            scene_context=context_text,
+            model_name=audit_model_name,
+            allow_replyer_fallback=allow_replyer_fallback,
+            log_prefix=self.log_prefix
+        )
+        logger.info(f"{self.log_prefix} 自拍二次审核结果: {passed}, 响应: {str(raw)[:30]}")
+        return passed
+
+    async def _build_selfie_description_with_scene(self, description: str, message_text: str) -> str:
+        """基于最近聊天情景生成自拍描述，失败时回退原描述。"""
+        use_scene_prompt = self.get_config("selfie.use_replyer_scene_prompt", True)
+        if not use_scene_prompt:
+            return description
+
+        user_request = (message_text or description or "").strip()
+        if not user_request:
+            return description
+
+        scene_prompt_model_name = str(self.get_config("selfie.scene_prompt_model_name", "replyer") or "").strip()
+        context_text = await self._collect_recent_chat_context_for_selfie()
+        success, generated = await generate_selfie_scene_prompt(
+            user_request=user_request,
+            scene_context=context_text,
+            model_name=scene_prompt_model_name,
+            log_prefix=self.log_prefix,
+        )
+        if success and generated and generated.strip():
+            return generated.strip()
+        return description
+
+    async def _collect_recent_chat_context_for_selfie(self) -> str:
+        """收集最近聊天上下文，供自拍审核与场景提示词生成。"""
+        context_limit = self.get_config("selfie.scene_context_limit", 12)
+        try:
+            context_limit = int(context_limit)
+            if context_limit < 3:
+                context_limit = 3
+            if context_limit > 30:
+                context_limit = 30
+        except Exception:
+            context_limit = 12
+
+        try:
+            from src.plugin_system.apis import message_api
+            from src.config.config import global_config
+
+            bot_id = str(getattr(getattr(global_config, "bot", None), "qq_account", ""))
+            messages = message_api.get_recent_messages(
+                self.chat_id,
+                hours=1.0,
+                limit=context_limit,
+                filter_mai=True
+            )
+            if not messages:
+                return ""
+
+            context_lines = []
+            for msg in messages[-context_limit:]:
+                if isinstance(msg, dict):
+                    text = (
+                        msg.get("processed_plain_text")
+                        or msg.get("display_message")
+                        or msg.get("raw_message")
+                        or ""
+                    )
+                    user_info = msg.get("user_info")
+                    uid = str(user_info.get("user_id")) if isinstance(user_info, dict) and user_info else ""
+                else:
+                    text = (
+                        getattr(msg, "processed_plain_text", "")
+                        or getattr(msg, "display_message", "")
+                        or getattr(msg, "raw_message", "")
+                        or ""
+                    )
+                    user_info = getattr(msg, "user_info", None)
+                    uid = str(getattr(user_info, "user_id", "")) if user_info else ""
+
+                cleaned = re.sub(r"\s+", " ", str(text)).strip()
+                if not cleaned:
+                    continue
+                if len(cleaned) > 120:
+                    cleaned = cleaned[:120] + "..."
+                role = "bot" if bot_id and uid == bot_id else "user"
+                context_lines.append(f"{role}: {cleaned}")
+
+            return "\n".join(context_lines[-context_limit:])
+        except Exception as e:
+            logger.warning(f"{self.log_prefix} 收集自拍场景上下文失败: {e}")
+            return ""
 
     async def _execute_unified_generation(self, description: str, model_id: str, size: str, strength: float = None, input_image_base64: str = None) -> Tuple[bool, Optional[str]]:
         """统一的图片生成执行方法"""
