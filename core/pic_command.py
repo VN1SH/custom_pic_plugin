@@ -1,4 +1,7 @@
 import asyncio
+import base64
+import binascii
+import os
 import re
 from typing import Tuple, Optional, Dict, Any
 
@@ -23,7 +26,7 @@ class PicGenerationCommand(BaseCommand):
     command_name = "pic_generation_command"
     command_description = "图生图命令，使用风格化提示词：/dr <风格> 或自然语言：/dr <描述>"
     # 排除配置管理保留词，避免与 PicConfigCommand 和 PicStyleCommand 重复匹配
-    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?!list\b|models\b|config\b|set\b|reset\b|on\b|off\b|model\b|recall\b|default\b|styles\b|style\b|help\b)(?P<content>.+)$"
+    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?!list\b|models\b|config\b|set\b|reset\b|on\b|off\b|model\b|recall\b|default\b|base\b|styles\b|style\b|help\b)(?P<content>.+)$"
 
     def get_config(self, key: str, default=None):
         """覆盖get_config方法以支持动态配置"""
@@ -65,7 +68,7 @@ class PicGenerationCommand(BaseCommand):
             return False, "缺少内容参数", True
 
         # 检查是否是配置管理保留词，避免冲突
-        config_reserved_words = {"list", "models", "config", "set", "reset", "styles", "style", "help"}
+        config_reserved_words = {"list", "models", "config", "set", "reset", "base", "styles", "style", "help"}
         if content.lower() in config_reserved_words:
             await self.send_text(f"'{content}' 是保留词，请使用其他名称")
             return False, f"使用了保留词: {content}", True
@@ -598,7 +601,7 @@ class PicConfigCommand(BaseCommand):
     # Command基本信息
     command_name = "pic_config_command"
     command_description = "图片生成配置管理：/dr <操作> [参数]"
-    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?P<action>list|models|config|set|reset|on|off|model|recall|default)(?:\s+(?P<params>.*))?$"
+    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?P<action>list|models|config|set|reset|on|off|model|recall|default|base)(?:\s+(?P<params>.*))?$"
 
     def get_config(self, key: str, default=None):
         """使用与PicGenerationCommand相同的配置覆盖"""
@@ -635,7 +638,7 @@ class PicConfigCommand(BaseCommand):
             return False, "无法获取chat_id", True
 
         # 需要管理员权限的操作
-        admin_only_actions = ["set", "reset", "on", "off", "model", "recall", "default"]
+        admin_only_actions = ["set", "reset", "on", "off", "model", "recall", "default", "base"]
         if not has_permission and action in admin_only_actions:
             await self.send_text("你无权使用此命令", storage_message=False)
             return False, "没有权限", True
@@ -658,13 +661,16 @@ class PicConfigCommand(BaseCommand):
             return await self._toggle_recall(params, chat_id)
         elif action == "default":
             return await self._set_default_model(params, chat_id)
+        elif action == "base":
+            return await self._manage_base_image(params)
         else:
             await self.send_text(
                 "配置管理命令使用方法：\n"
                 "/dr list - 列出所有可用模型\n"
                 "/dr config - 显示当前配置\n"
                 "/dr set <模型ID> - 设置图生图命令模型\n"
-                "/dr reset - 重置为默认配置"
+                "/dr reset - 重置为默认配置\n"
+                "/dr base add|show|clear - 管理自拍底图（需引用图片）"
             )
             return False, "无效的操作参数", True
 
@@ -722,6 +728,7 @@ class PicConfigCommand(BaseCommand):
                 message_lines.append("• /dr recall on|off <模型ID> - 开关撤回")
                 message_lines.append("• /dr default <模型ID> - 设置默认模型")
                 message_lines.append("• /dr set <模型ID> - 设置/dr命令模型")
+                message_lines.append("• /dr base add|show|clear - 管理自拍底图（引用图片）")
 
             # 图例说明
             message_lines.append("\n📖 图例：✅默认 🔧/dr命令 🖼️图生图 📝仅文生图")
@@ -837,7 +844,8 @@ class PicConfigCommand(BaseCommand):
                 "• /dr recall on|off <模型ID> - 开关撤回",
                 "• /dr default <模型ID> - 设置默认模型",
                 "• /dr set <模型ID> - 设置/dr命令模型",
-                "• /dr reset - 重置所有配置"
+                "• /dr reset - 重置所有配置",
+                "• /dr base add|show|clear - 管理自拍底图（引用图片）"
             ])
 
             message = "\n".join(message_lines)
@@ -965,6 +973,255 @@ class PicConfigCommand(BaseCommand):
             logger.error(f"{self.log_prefix} 设置默认模型失败: {e!r}")
             await self.send_text(f"设置失败：{str(e)[:100]}")
             return False, f"设置默认模型失败: {str(e)}", True
+
+    async def _manage_base_image(self, params: str) -> Tuple[bool, Optional[str], bool]:
+        """管理自拍底图：/dr base add|show|clear"""
+        sub_action = (params or "").strip().split(maxsplit=1)[0].lower() if params else ""
+        if not sub_action:
+            sub_action = "show"
+
+        if sub_action == "add":
+            return await self._add_base_image_from_reply()
+        if sub_action == "show":
+            return await self._show_base_image_status()
+        if sub_action == "clear":
+            return await self._clear_base_image()
+
+        await self.send_text(
+            "底图命令格式：\n"
+            "/dr base add - 引用一张图片并设为自拍底图\n"
+            "/dr base show - 查看当前自拍底图状态\n"
+            "/dr base clear - 清除当前自拍底图"
+        )
+        return False, f"无效的 base 子命令: {sub_action}", True
+
+    async def _add_base_image_from_reply(self) -> Tuple[bool, Optional[str], bool]:
+        """通过引用消息添加自拍底图"""
+        image_base64 = await self._extract_quoted_image_base64()
+        if not image_base64:
+            await self.send_text("请先在群聊中引用一张图片，再发送 /dr base add")
+            return False, "未检测到引用图片", True
+
+        saved_path = self._save_base64_image_to_auto_base(image_base64)
+        if not saved_path:
+            await self.send_text("底图保存失败，请确认引用的是有效图片")
+            return False, "底图保存失败", True
+
+        relative_path = self._to_plugin_relative_path(saved_path)
+        await self.send_text(f"已更新自拍底图：{relative_path}")
+        logger.info(f"{self.log_prefix} 自拍底图已更新: {saved_path}")
+        return True, "自拍底图更新成功", True
+
+    async def _show_base_image_status(self) -> Tuple[bool, Optional[str], bool]:
+        """显示当前自拍底图状态"""
+        configured_path = (self.get_config("selfie.reference_image_path", "") or "").strip()
+        auto_path = self._find_existing_auto_base_image()
+
+        message_lines = ["自拍底图状态："]
+        if configured_path:
+            configured_abs = self._resolve_path_under_plugin(configured_path)
+            configured_exists = os.path.exists(configured_abs)
+            status = "存在" if configured_exists else "不存在"
+            message_lines.append(f"- 配置底图: {configured_path} ({status})")
+        else:
+            message_lines.append("- 配置底图: 未设置")
+
+        if auto_path:
+            message_lines.append(f"- 命令底图: {self._to_plugin_relative_path(auto_path)} (存在)")
+        else:
+            message_lines.append("- 命令底图: 未设置")
+
+        if configured_path:
+            message_lines.append("当前优先使用配置底图；配置底图无效时，自动回退到命令底图。")
+        else:
+            message_lines.append("当前优先使用命令底图。")
+
+        await self.send_text("\n".join(message_lines))
+        return True, "底图状态查询成功", True
+
+    async def _clear_base_image(self) -> Tuple[bool, Optional[str], bool]:
+        """清除命令方式保存的自拍底图"""
+        removed = self._remove_all_auto_base_images()
+        if removed:
+            await self.send_text("已清除命令底图")
+            return True, "命令底图已清除", True
+        await self.send_text("当前没有命令底图可清除")
+        return False, "没有命令底图", True
+
+    async def _extract_quoted_image_base64(self) -> Optional[str]:
+        """从当前消息引用内容中提取图片（严格要求引用，不回退最近图片）"""
+        image_processor = ImageProcessor(self)
+        action_message = image_processor._get_action_message()
+        if not action_message:
+            return None
+
+        if not self._has_reply_context(action_message):
+            return None
+
+        # 1) 优先解析结构化引用对象
+        for field in ("reply_message", "quoted_message", "reply"):
+            reply_data = action_message.get(field) if isinstance(action_message, dict) else getattr(action_message, field, None)
+            if reply_data:
+                image = await image_processor._extract_image_from_message(reply_data)
+                normalized = self._normalize_image_base64(image)
+                if normalized:
+                    return normalized
+
+        # 2) reply_to -> 查询消息体
+        reply_to = action_message.get("reply_to") if isinstance(action_message, dict) else getattr(action_message, "reply_to", None)
+        if reply_to:
+            reply_message = await image_processor._get_message_by_id(reply_to)
+            if reply_message:
+                image = await image_processor._extract_image_from_message(reply_message)
+                normalized = self._normalize_image_base64(image)
+                if normalized:
+                    return normalized
+
+        # 3) 某些平台会把引用内容折叠在当前 message_segment 中
+        message_segments = None
+        if hasattr(self, "message") and hasattr(self.message, "message_segment"):
+            message_segments = self.message.message_segment
+        if message_segments:
+            image_list = image_processor.find_and_return_emoji_in_message(message_segments)
+            for image in image_list:
+                normalized = self._normalize_image_base64(image)
+                if normalized:
+                    return normalized
+
+        return None
+
+    def _has_reply_context(self, action_message: Any) -> bool:
+        """判断消息是否是引用/回复场景"""
+        reply_fields = ("reply_to", "reply_message", "quoted_message", "reply")
+        if isinstance(action_message, dict):
+            for field in reply_fields:
+                if action_message.get(field):
+                    return True
+            text = (
+                str(action_message.get("processed_plain_text", "") or "")
+                + str(action_message.get("display_message", "") or "")
+                + str(action_message.get("raw_message", "") or "")
+            )
+            return "[回复" in text and "]" in text
+
+        for field in reply_fields:
+            if getattr(action_message, field, None):
+                return True
+        text = (
+            str(getattr(action_message, "processed_plain_text", "") or "")
+            + str(getattr(action_message, "display_message", "") or "")
+            + str(getattr(action_message, "raw_message", "") or "")
+        )
+        return "[回复" in text and "]" in text
+
+    def _normalize_image_base64(self, raw_image: Any) -> Optional[str]:
+        """规范化图片 base64 字符串，支持 data URL"""
+        if not raw_image:
+            return None
+        if isinstance(raw_image, bytes):
+            return base64.b64encode(raw_image).decode("utf-8")
+        if not isinstance(raw_image, str):
+            return None
+
+        payload = raw_image.strip()
+        if payload.startswith("data:image/") and ";base64," in payload:
+            payload = payload.split(";base64,", 1)[1].strip()
+        payload = re.sub(r"\s+", "", payload)
+        if not payload:
+            return None
+        return payload
+
+    def _save_base64_image_to_auto_base(self, base64_str: str) -> Optional[str]:
+        """保存引用图片为命令底图，并清理旧底图"""
+        payload = (base64_str or "").strip()
+        if payload.startswith("data:image/") and ";base64," in payload:
+            payload = payload.split(";base64,", 1)[1].strip()
+        payload = re.sub(r"\s+", "", payload)
+        if not payload:
+            return None
+
+        try:
+            image_bytes = base64.b64decode(payload, validate=True)
+        except (ValueError, binascii.Error):
+            return None
+
+        ext = self._detect_image_extension(image_bytes)
+        if not ext:
+            return None
+
+        images_dir = os.path.dirname(self._get_auto_base_path("png"))
+        os.makedirs(images_dir, exist_ok=True)
+
+        self._remove_all_auto_base_images()
+        target_path = self._get_auto_base_path(ext)
+        try:
+            with open(target_path, "wb") as f:
+                f.write(image_bytes)
+            return target_path
+        except Exception as e:
+            logger.error(f"{self.log_prefix} 保存自拍底图失败: {e!r}")
+            return None
+
+    def _detect_image_extension(self, image_bytes: bytes) -> Optional[str]:
+        """根据魔数识别图片扩展名"""
+        if len(image_bytes) >= 8 and image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "png"
+        if len(image_bytes) >= 3 and image_bytes.startswith(b"\xff\xd8\xff"):
+            return "jpg"
+        if len(image_bytes) >= 12 and image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+            return "webp"
+        if len(image_bytes) >= 6 and (image_bytes.startswith(b"GIF87a") or image_bytes.startswith(b"GIF89a")):
+            return "gif"
+        return None
+
+    def _find_existing_auto_base_image(self) -> Optional[str]:
+        """返回第一个存在的命令底图路径"""
+        for ext in ("png", "jpg", "jpeg", "webp", "gif"):
+            candidate = self._get_auto_base_path(ext)
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _remove_all_auto_base_images(self) -> bool:
+        """清理命令底图文件"""
+        removed = False
+        for ext in ("png", "jpg", "jpeg", "webp", "gif"):
+            candidate = self._get_auto_base_path(ext)
+            if os.path.exists(candidate):
+                try:
+                    os.remove(candidate)
+                    removed = True
+                except Exception as e:
+                    logger.warning(f"{self.log_prefix} 删除底图失败: {candidate}, {e!r}")
+        return removed
+
+    def _get_auto_base_path(self, ext: str) -> str:
+        """命令底图固定路径（按扩展名）"""
+        plugin_dir = self._get_plugin_dir()
+        return os.path.join(plugin_dir, "images", f"selfie_base_auto.{ext}")
+
+    def _get_plugin_dir(self) -> str:
+        """获取插件根目录"""
+        plugin_dir = getattr(self, "plugin_dir", None)
+        if plugin_dir and isinstance(plugin_dir, str):
+            return plugin_dir
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _resolve_path_under_plugin(self, path_value: str) -> str:
+        """把配置路径解析为绝对路径"""
+        if not path_value:
+            return ""
+        if os.path.isabs(path_value):
+            return path_value
+        return os.path.join(self._get_plugin_dir(), path_value)
+
+    def _to_plugin_relative_path(self, abs_path: str) -> str:
+        """把绝对路径转成插件相对路径，便于展示"""
+        plugin_dir = self._get_plugin_dir()
+        try:
+            return os.path.relpath(abs_path, plugin_dir)
+        except Exception:
+            return abs_path
 
     def _check_permission(self) -> bool:
         """检查用户权限"""
@@ -1118,6 +1375,7 @@ class PicStyleCommand(BaseCommand):
 • /dr config - 查看当前配置
 • /dr set <模型ID> - 设置图生图模型
 • /dr reset - 重置为默认配置
+• /dr base add|show|clear - 管理自拍底图（引用图片）
 
 💡 使用流程：
 1. 发送一张图片

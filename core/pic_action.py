@@ -215,7 +215,7 @@ class Custom_Pic_Action(BaseAction):
             require_base_image = self.get_config("selfie.require_base_image", True)
             reference_image = self._get_selfie_reference_image()
             if require_base_image and not reference_image:
-                await self.send_text("自拍底图未配置，无法执行自拍生图。请先设置 selfie.reference_image_path。")
+                await self.send_text("自拍底图未配置，无法执行自拍生图。请先引用图片并发送 /dr base add，或设置 selfie.reference_image_path。")
                 return False, "自拍底图未配置"
 
             # 自拍生图优先使用底图（图生图）
@@ -702,28 +702,62 @@ class Custom_Pic_Action(BaseAction):
         Returns:
             图片的base64编码，如果不存在则返回None
         """
-        image_path = self.get_config("selfie.reference_image_path", "").strip()
-        if not image_path:
-            return None
+        configured_path = (self.get_config("selfie.reference_image_path", "") or "").strip()
+        candidate_paths = []
 
-        try:
-            # 处理相对路径（相对于插件目录）
-            if not os.path.isabs(image_path):
-                plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                image_path = os.path.join(plugin_dir, image_path)
+        # 1) 优先配置项路径
+        if configured_path:
+            candidate_paths.append(self._resolve_selfie_path(configured_path))
 
-            if os.path.exists(image_path):
-                with open(image_path, 'rb') as f:
+        # 2) 回退到命令添加的默认底图
+        candidate_paths.extend(self._get_auto_selfie_base_candidates())
+
+        checked = set()
+        for image_path in candidate_paths:
+            if not image_path or image_path in checked:
+                continue
+            checked.add(image_path)
+            if not os.path.exists(image_path):
+                continue
+            try:
+                with open(image_path, "rb") as f:
                     image_data = f.read()
-                image_base64 = base64.b64encode(image_data).decode('utf-8')
+                image_base64 = base64.b64encode(image_data).decode("utf-8")
                 logger.info(f"{self.log_prefix} 从文件加载自拍参考图片: {image_path}")
                 return image_base64
-            else:
-                logger.warning(f"{self.log_prefix} 自拍参考图片文件不存在: {image_path}")
-                return None
-        except Exception as e:
-            logger.error(f"{self.log_prefix} 加载自拍参考图片失败: {e}")
-            return None
+            except Exception as e:
+                logger.error(f"{self.log_prefix} 加载自拍参考图片失败: {image_path}, {e}")
+
+        if configured_path:
+            logger.warning(f"{self.log_prefix} 自拍参考图片文件不存在或不可读: {configured_path}")
+        return None
+
+    def _resolve_selfie_path(self, path_value: str) -> str:
+        """将自拍路径解析为绝对路径"""
+        if not path_value:
+            return ""
+        if os.path.isabs(path_value):
+            return path_value
+        return os.path.join(self._get_plugin_dir(), path_value)
+
+    def _get_auto_selfie_base_candidates(self) -> List[str]:
+        """命令添加自拍底图的候选路径"""
+        plugin_dir = self._get_plugin_dir()
+        base_dir = os.path.join(plugin_dir, "images")
+        return [
+            os.path.join(base_dir, "selfie_base_auto.png"),
+            os.path.join(base_dir, "selfie_base_auto.jpg"),
+            os.path.join(base_dir, "selfie_base_auto.jpeg"),
+            os.path.join(base_dir, "selfie_base_auto.webp"),
+            os.path.join(base_dir, "selfie_base_auto.gif"),
+        ]
+
+    def _get_plugin_dir(self) -> str:
+        """获取插件根目录"""
+        plugin_dir = getattr(self, "plugin_dir", None)
+        if plugin_dir and isinstance(plugin_dir, str):
+            return plugin_dir
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     async def _schedule_auto_recall_for_recent_message(self, model_config: Dict[str, Any] = None):
         """安排最近发送消息的自动撤回
