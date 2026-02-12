@@ -742,14 +742,28 @@ class Custom_Pic_Action(BaseAction):
 
     def _get_auto_selfie_base_candidates(self) -> List[str]:
         """命令添加自拍底图的候选路径"""
-        plugin_dir = self._get_plugin_dir()
-        base_dir = os.path.join(plugin_dir, "images")
+        configured_path = (self.get_config("selfie.auto_base_image_path", "images/selfie_base_auto.png") or "").strip()
+        if not configured_path:
+            configured_path = "images/selfie_base_auto.png"
+
+        abs_path = self._resolve_selfie_path(configured_path)
+        base_no_ext, ext = os.path.splitext(abs_path)
+        ext = (ext or "").lower()
+
+        if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+            ordered_exts = [ext, ".png", ".jpg", ".jpeg", ".webp", ".gif"]
+            dedup_exts = []
+            for item in ordered_exts:
+                if item not in dedup_exts:
+                    dedup_exts.append(item)
+            return [f"{base_no_ext}{item}" for item in dedup_exts]
+
         return [
-            os.path.join(base_dir, "selfie_base_auto.png"),
-            os.path.join(base_dir, "selfie_base_auto.jpg"),
-            os.path.join(base_dir, "selfie_base_auto.jpeg"),
-            os.path.join(base_dir, "selfie_base_auto.webp"),
-            os.path.join(base_dir, "selfie_base_auto.gif"),
+            f"{base_no_ext}.png",
+            f"{base_no_ext}.jpg",
+            f"{base_no_ext}.jpeg",
+            f"{base_no_ext}.webp",
+            f"{base_no_ext}.gif",
         ]
 
     def _get_plugin_dir(self) -> str:

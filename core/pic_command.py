@@ -13,6 +13,7 @@ from .image_utils import ImageProcessor
 from .runtime_state import runtime_state
 from .prompt_optimizer import optimize_prompt
 from .size_utils import get_image_size_async
+from .config_manager import EnhancedConfigManager
 
 logger = get_logger("pic_command")
 
@@ -1008,6 +1009,7 @@ class PicConfigCommand(BaseCommand):
             return False, "底图保存失败", True
 
         relative_path = self._to_plugin_relative_path(saved_path)
+        self._persist_selfie_reference_path(relative_path)
         await self.send_text(f"已更新自拍底图：{relative_path}")
         logger.info(f"{self.log_prefix} 自拍底图已更新: {saved_path}")
         return True, "自拍底图更新成功", True
@@ -1042,6 +1044,7 @@ class PicConfigCommand(BaseCommand):
     async def _clear_base_image(self) -> Tuple[bool, Optional[str], bool]:
         """清除命令方式保存的自拍底图"""
         removed = self._remove_all_auto_base_images()
+        self._clear_selfie_reference_path_if_auto()
         if removed:
             await self.send_text("已清除命令底图")
             return True, "命令底图已清除", True
@@ -1197,8 +1200,50 @@ class PicConfigCommand(BaseCommand):
 
     def _get_auto_base_path(self, ext: str) -> str:
         """命令底图固定路径（按扩展名）"""
-        plugin_dir = self._get_plugin_dir()
-        return os.path.join(plugin_dir, "images", f"selfie_base_auto.{ext}")
+        configured_path = (self.get_config("selfie.auto_base_image_path", "images/selfie_base_auto.png") or "").strip()
+        if not configured_path:
+            configured_path = "images/selfie_base_auto.png"
+        abs_path = self._resolve_path_under_plugin(configured_path)
+        base_no_ext, _ = os.path.splitext(abs_path)
+        return f"{base_no_ext}.{ext}"
+
+    def _persist_selfie_reference_path(self, relative_path: str) -> None:
+        """持久化 selfie.reference_image_path 到 config.toml"""
+        try:
+            manager = EnhancedConfigManager(self._get_plugin_dir(), "config.toml")
+            config = manager.load_config() or {}
+            selfie = config.get("selfie")
+            if not isinstance(selfie, dict):
+                selfie = {}
+                config["selfie"] = selfie
+            selfie["reference_image_path"] = relative_path
+            manager.save_config(config)
+            PicGenerationCommand._config_overrides["selfie.reference_image_path"] = relative_path
+        except Exception as e:
+            logger.warning(f"{self.log_prefix} 持久化自拍底图路径失败: {e!r}")
+
+    def _clear_selfie_reference_path_if_auto(self) -> None:
+        """如果当前 reference_image_path 指向命令底图，则清空配置"""
+        try:
+            manager = EnhancedConfigManager(self._get_plugin_dir(), "config.toml")
+            config = manager.load_config() or {}
+            selfie = config.get("selfie")
+            if not isinstance(selfie, dict):
+                return
+            current = str(self.get_config("selfie.reference_image_path", "") or "").strip()
+            if not current:
+                return
+
+            current_abs = self._resolve_path_under_plugin(current)
+            auto_abs_set = {self._get_auto_base_path(ext) for ext in ("png", "jpg", "jpeg", "webp", "gif")}
+            if current_abs not in auto_abs_set:
+                return
+
+            selfie["reference_image_path"] = ""
+            manager.save_config(config)
+            PicGenerationCommand._config_overrides["selfie.reference_image_path"] = ""
+        except Exception as e:
+            logger.warning(f"{self.log_prefix} 清理自拍底图路径失败: {e!r}")
 
     def _get_plugin_dir(self) -> str:
         """获取插件根目录"""

@@ -1,3 +1,4 @@
+import copy
 from typing import List, Tuple, Type, Dict, Any
 import os
 
@@ -46,13 +47,14 @@ class CustomPicPlugin(BasePlugin):
 
     # 插件基本信息
     plugin_name = "custom_pic_plugin"
-    plugin_version = "3.3.5"
+    plugin_version = "3.3.6"
     plugin_author = "Ptrel，Rabbit"
     enable_plugin = True
     dependencies: List[str] = []
     python_dependencies: List[str] = []
     config_file_name = "config.toml"
     llm_slot_choices = _discover_llm_slot_choices()
+    webui_model_slots = 5
 
     # 配置节元数据
     config_section_descriptions = {
@@ -185,7 +187,7 @@ class CustomPicPlugin(BasePlugin):
             ),
             "config_version": ConfigField(
                 type=str,
-                default="3.3.5",
+                default="3.3.6",
                 description="插件配置版本号",
                 disabled=True,
                 order=2
@@ -375,6 +377,15 @@ class CustomPicPlugin(BasePlugin):
                 depends_on="selfie.enabled",
                 depends_value=True,
                 order=2
+            ),
+            "auto_base_image_path": ConfigField(
+                type=str,
+                default="images/selfie_base_auto.png",
+                description="通过 /dr base add 保存的自拍底图路径（相对或绝对路径）",
+                placeholder="images/selfie_base_auto.png",
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=30
             ),
             "prompt_prefix": ConfigField(
                 type=str,
@@ -622,6 +633,7 @@ class CustomPicPlugin(BasePlugin):
     def __init__(self, plugin_dir: str):
         """初始化插件，集成增强配置管理器"""
         import toml
+        self._refresh_model_slot_schema()
         self._refresh_llm_slot_choices()
         # 在父类初始化前读取原始配置文件
         config_path = os.path.join(plugin_dir, self.config_file_name)
@@ -653,6 +665,48 @@ class CustomPicPlugin(BasePlugin):
             field = selfie_schema.get(key)
             if isinstance(field, ConfigField):
                 field.choices = choices
+
+    @classmethod
+    def _refresh_model_slot_schema(cls):
+        """Expand model sections for WebUI editing."""
+        max_slots = int(getattr(cls, "webui_model_slots", 1) or 1)
+        if max_slots < 1:
+            max_slots = 1
+
+        template = cls.config_schema.get("models.model1")
+        if not isinstance(template, dict):
+            return
+
+        section_ids = [f"models.model{i}" for i in range(1, max_slots + 1)]
+        for idx, section_id in enumerate(section_ids, start=1):
+            if section_id not in cls.config_schema:
+                cls.config_schema[section_id] = copy.deepcopy(template)
+            if idx > 1:
+                name_field = cls.config_schema[section_id].get("name")
+                if isinstance(name_field, ConfigField):
+                    name_field.default = f"模型{idx}"
+
+            if section_id not in cls.config_section_descriptions:
+                cls.config_section_descriptions[section_id] = ConfigSection(
+                    title=f"模型{idx}配置",
+                    icon="box",
+                    order=12 + idx
+                )
+
+        models_section = cls.config_section_descriptions.get("models")
+        if isinstance(models_section, ConfigSection):
+            models_section.description = f"可在 WebUI 直接编辑 model1-model{max_slots}"
+
+        models_schema = cls.config_schema.get("models")
+        if isinstance(models_schema, dict):
+            hint_field = models_schema.get("hint")
+            if isinstance(hint_field, ConfigField):
+                hint_field.default = f"WebUI 可直接编辑 model1-model{max_slots}；需要更多模型时再手动编辑 config.toml"
+
+        for tab in cls.config_layout.tabs:
+            if getattr(tab, "id", "") == "models":
+                tab.sections = ["models"] + section_ids
+                break
     
     def _enhance_config_management(self, original_config=None):
         """增强配置管理：备份、版本检查、智能合并
