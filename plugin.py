@@ -47,7 +47,7 @@ class CustomPicPlugin(BasePlugin):
 
     # 插件基本信息
     plugin_name = "custom_pic_plugin"
-    plugin_version = "3.3.7"
+    plugin_version = "3.3.8"
     plugin_author = "Ptrel，Rabbit"
     enable_plugin = True
     dependencies: List[str] = []
@@ -118,7 +118,7 @@ class CustomPicPlugin(BasePlugin):
             icon="cpu",
             order=11
         ),
-        "models.model1": ConfigSection(
+        "model1": ConfigSection(
             title="模型1",
             description="API 地址和密钥就在本分组：base_url 与 api_key。",
             icon="box",
@@ -157,7 +157,7 @@ class CustomPicPlugin(BasePlugin):
             ConfigTab(
                 id="models",
                 title="模型",
-                sections=["models", "models.model1"],
+                sections=["models", "model1"],
                 icon="cpu"
             ),
             ConfigTab(
@@ -189,7 +189,7 @@ class CustomPicPlugin(BasePlugin):
             ),
             "config_version": ConfigField(
                 type=str,
-                default="3.3.7",
+                default="3.3.8",
                 description="插件配置版本号",
                 disabled=True,
                 order=2
@@ -208,6 +208,7 @@ class CustomPicPlugin(BasePlugin):
                 description="Action 默认使用的模型槽位。请在“模型”页维护各槽位的 base_url、api_key、format、model。",
                 placeholder="model1",
                 choices=model_slot_choices,
+                input_type="select",
                 order=1
             ),
         },
@@ -260,6 +261,7 @@ class CustomPicPlugin(BasePlugin):
                 description="Command 默认使用的模型槽位。可在群内通过 /dr set 临时切换。",
                 placeholder="model1",
                 choices=model_slot_choices,
+                input_type="select",
                 order=5
             ),
             "enable_debug_info": ConfigField(
@@ -423,6 +425,7 @@ class CustomPicPlugin(BasePlugin):
                 default="planner",
                 description="自拍审核使用的主程序模型槽位（下拉选择）",
                 choices=llm_slot_choices,
+                input_type="select",
                 depends_on="selfie.enabled",
                 depends_value=True,
                 order=6
@@ -448,6 +451,7 @@ class CustomPicPlugin(BasePlugin):
                 default="replyer",
                 description="自拍场景提示词使用的主程序模型槽位（下拉选择）",
                 choices=llm_slot_choices,
+                input_type="select",
                 depends_on="selfie.enabled",
                 depends_value=True,
                 order=9
@@ -513,7 +517,7 @@ class CustomPicPlugin(BasePlugin):
             )
         },
         # 基础模型配置模板
-        "models.model1": {
+        "model1": {
             "name": ConfigField(
                 type=str,
                 default="默认模型1",
@@ -542,6 +546,7 @@ class CustomPicPlugin(BasePlugin):
                 default="openai",
                 description="API格式。openai=通用格式，doubao=豆包，gemini=Gemini，modelscope=魔搭，shatangyun=砂糖云(NovelAI)，mengyuai=梦羽AI，zai=Zai(Gemini转发)",
                 choices=["openai", "gemini", "doubao", "modelscope", "shatangyun", "mengyuai", "zai"],
+                input_type="select",
                 order=4
             ),
             "model": ConfigField(
@@ -646,6 +651,7 @@ class CustomPicPlugin(BasePlugin):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     original_config = toml.load(f)
+                original_config = self._normalize_model_sections_for_file(original_config)
                 print(f"[CustomPicPlugin] 读取原始配置文件: {config_path}")
             except Exception as e:
                 print(f"[CustomPicPlugin] 读取原始配置失败: {e}")
@@ -658,6 +664,7 @@ class CustomPicPlugin(BasePlugin):
         
         # 检查并更新配置（如果需要），传入原始配置
         self._enhance_config_management(original_config)
+        self._attach_runtime_models_alias()
 
     @classmethod
     def _refresh_llm_slot_choices(cls):
@@ -669,6 +676,7 @@ class CustomPicPlugin(BasePlugin):
             field = selfie_schema.get(key)
             if isinstance(field, ConfigField):
                 field.choices = choices
+                field.input_type = "select"
 
     @classmethod
     def _refresh_model_slot_schema(cls):
@@ -677,7 +685,7 @@ class CustomPicPlugin(BasePlugin):
         if max_slots < 1:
             max_slots = 1
 
-        template = cls.config_schema.get("models.model1")
+        template = cls.config_schema.get("model1")
         if not isinstance(template, dict):
             return
 
@@ -688,6 +696,7 @@ class CustomPicPlugin(BasePlugin):
         default_model_field = generation_schema.get("default_model") if isinstance(generation_schema, dict) else None
         if isinstance(default_model_field, ConfigField):
             default_model_field.choices = model_slot_choices
+            default_model_field.input_type = "select"
             if default_model_field.default not in model_slot_choices:
                 default_model_field.default = model_slot_choices[0]
 
@@ -695,10 +704,11 @@ class CustomPicPlugin(BasePlugin):
         command_model_field = components_schema.get("pic_command_model") if isinstance(components_schema, dict) else None
         if isinstance(command_model_field, ConfigField):
             command_model_field.choices = model_slot_choices
+            command_model_field.input_type = "select"
             if command_model_field.default not in model_slot_choices:
                 command_model_field.default = model_slot_choices[0]
 
-        section_ids = [f"models.model{i}" for i in range(1, max_slots + 1)]
+        section_ids = [f"model{i}" for i in range(1, max_slots + 1)]
         for idx, section_id in enumerate(section_ids, start=1):
             if section_id not in cls.config_schema:
                 cls.config_schema[section_id] = copy.deepcopy(template)
@@ -727,13 +737,81 @@ class CustomPicPlugin(BasePlugin):
             if isinstance(hint_field, ConfigField):
                 hint_field.default = (
                     f"可直接在 WebUI 配置 model1-model{max_slots}。"
-                    "若需要更多模型，请复制 [models.model1] 后命名为 model6、model7..."
+                    "若需要更多模型，请复制 [model1] 后命名为 model6、model7..."
                 )
 
         for tab in cls.config_layout.tabs:
             if getattr(tab, "id", "") == "models":
                 tab.sections = ["models"] + section_ids
                 break
+
+    @classmethod
+    def _get_model_slot_ids(cls) -> List[str]:
+        max_slots = int(getattr(cls, "webui_model_slots", 1) or 1)
+        if max_slots < 1:
+            max_slots = 1
+        return [f"model{i}" for i in range(1, max_slots + 1)]
+
+    @classmethod
+    def _normalize_model_sections_for_file(cls, config: Dict[str, Any]) -> Dict[str, Any]:
+        """将历史 models.modelX 迁移为顶层 modelX，避免 WebUI 显示 [object Object]。"""
+        if not isinstance(config, dict):
+            return config
+
+        normalized = copy.deepcopy(config)
+        slot_ids = cls._get_model_slot_ids()
+
+        models_section = normalized.get("models")
+        if isinstance(models_section, dict):
+            for model_id in slot_ids:
+                model_cfg = models_section.get(model_id)
+                if isinstance(model_cfg, dict) and not isinstance(normalized.get(model_id), dict):
+                    normalized[model_id] = copy.deepcopy(model_cfg)
+
+            for key in list(models_section.keys()):
+                if key.startswith("model") and isinstance(models_section.get(key), dict):
+                    models_section.pop(key, None)
+
+        for model_id in slot_ids:
+            dotted_key = f"models.{model_id}"
+            dotted_cfg = normalized.get(dotted_key)
+            if isinstance(dotted_cfg, dict):
+                if not isinstance(normalized.get(model_id), dict):
+                    normalized[model_id] = copy.deepcopy(dotted_cfg)
+                normalized.pop(dotted_key, None)
+
+        return normalized
+
+    def _attach_runtime_models_alias(self):
+        """运行时兼容：将顶层 modelX 组装为 models.modelX 供旧逻辑读取。"""
+        if not isinstance(self.config, dict):
+            return
+
+        slot_ids = self._get_model_slot_ids()
+        models_section = self.config.get("models")
+        non_model_fields: Dict[str, Any] = {}
+        if isinstance(models_section, dict):
+            non_model_fields = {
+                k: v for k, v in models_section.items()
+                if not (k.startswith("model") and isinstance(v, dict))
+            }
+
+        alias_models: Dict[str, Dict[str, Any]] = {}
+        for model_id in slot_ids:
+            model_cfg = self.config.get(model_id)
+            if isinstance(model_cfg, dict):
+                alias_models[model_id] = model_cfg
+
+        if isinstance(models_section, dict):
+            for model_id in slot_ids:
+                legacy_cfg = models_section.get(model_id)
+                if isinstance(legacy_cfg, dict) and model_id not in alias_models:
+                    alias_models[model_id] = legacy_cfg
+                    self.config[model_id] = legacy_cfg
+
+        merged_models = dict(non_model_fields)
+        merged_models.update(alias_models)
+        self.config["models"] = merged_models
     
     def _enhance_config_management(self, original_config=None):
         """增强配置管理：备份、版本检查、智能合并
@@ -773,6 +851,8 @@ class CustomPicPlugin(BasePlugin):
                         print(f"[CustomPicPlugin] 从备份文件加载原始配置: {backup_files[0]}")
                     except Exception as e:
                         print(f"[CustomPicPlugin] 加载备份文件失败: {e}")
+        if isinstance(old_config, dict):
+            old_config = self._normalize_model_sections_for_file(old_config)
         
         # 每次启动时创建备份（无论版本是否相同）
         # 加载当前配置文件以获取版本
@@ -792,6 +872,11 @@ class CustomPicPlugin(BasePlugin):
             schema=schema_for_manager,
             old_config=old_config
         )
+
+        normalized_updated = self._normalize_model_sections_for_file(updated_config) if isinstance(updated_config, dict) else updated_config
+        if isinstance(normalized_updated, dict) and normalized_updated != updated_config:
+            self.enhanced_config_manager.save_config_with_comments(normalized_updated, schema_for_manager)
+            updated_config = normalized_updated
         
         # 如果配置有更新，更新self.config
         if updated_config and updated_config != self.config:
