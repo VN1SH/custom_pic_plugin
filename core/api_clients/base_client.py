@@ -101,6 +101,32 @@ class BaseApiClient:
             return image_base64.split(',')[1]
         return image_base64
 
+    def _normalize_authorization(self, api_key: str) -> str:
+        """规范化 Authorization 头值。
+
+        约定：
+        - 若已包含 Bearer/Basic 前缀则保持原样
+        - 否则自动补全为 Bearer <token>
+        """
+        value = str(api_key or "").strip()
+        if not value:
+            return ""
+        lowered = value.lower()
+        if lowered.startswith("bearer ") or lowered.startswith("basic "):
+            return value
+        return f"Bearer {value}"
+
+    def _mask_authorization(self, authorization: str) -> str:
+        """隐藏 Authorization 头中的敏感值，仅保留协议前缀。"""
+        value = str(authorization or "").strip()
+        if not value:
+            return ""
+        if value.startswith("Bearer "):
+            return "Bearer ***"
+        if value.startswith("Basic "):
+            return "Basic ***"
+        return "***"
+
     async def generate_image(
         self,
         prompt: str,

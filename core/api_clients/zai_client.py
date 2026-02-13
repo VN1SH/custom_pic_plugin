@@ -4,6 +4,7 @@
 import json
 import re
 import urllib.request
+import urllib.error
 import traceback
 from typing import Dict, Any, Tuple, Optional
 
@@ -72,13 +73,23 @@ class ZaiClient(BaseApiClient):
         proxy_config = self._get_proxy_config()
 
         data = json.dumps(payload).encode("utf-8")
+        authorization = self._normalize_authorization(api_key)
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "Authorization": f"{api_key}"
+            "Authorization": authorization
         }
 
         logger.info(f"{self.log_prefix} (Zai) 发起请求: {model}, Prompt: {full_prompt[:50]}... To: {endpoint}")
+        verbose_debug = self.action.get_config("components.enable_verbose_debug", False)
+        if verbose_debug:
+            safe_headers = headers.copy()
+            safe_headers["Authorization"] = self._mask_authorization(safe_headers.get("Authorization"))
+            logger.info(f"{self.log_prefix} (Zai) 详细调试 - 请求头: {safe_headers}")
+            logger.info(
+                f"{self.log_prefix} (Zai) 详细调试 - 请求体: "
+                f"{json.dumps(payload, ensure_ascii=False, indent=2)[:1200]}"
+            )
 
         req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
 
@@ -134,6 +145,17 @@ class ZaiClient(BaseApiClient):
                     logger.error(f"{self.log_prefix} (Zai) API 请求失败. 状态 {response_status}. 正文: {body_str[:300]}...")
                     return False, f"API 请求失败(状态码 {response_status})"
 
+        except urllib.error.HTTPError as e:
+            try:
+                error_body_bytes = e.read()
+                error_body = error_body_bytes.decode("utf-8", errors="replace")
+            except Exception:
+                error_body = ""
+            logger.error(
+                f"{self.log_prefix} (Zai) HTTP错误: status={getattr(e, 'code', 'unknown')}, "
+                f"body={error_body[:500]}"
+            )
+            return False, f"HTTP {getattr(e, 'code', 'unknown')}: {error_body[:180]}"
         except Exception as e:
             logger.error(f"{self.log_prefix} (Zai) 请求异常: {e!r}", exc_info=True)
             traceback.print_exc()

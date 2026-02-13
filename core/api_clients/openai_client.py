@@ -4,6 +4,7 @@
 """
 import json
 import urllib.request
+import urllib.error
 import traceback
 from typing import Dict, Any, Tuple
 
@@ -111,10 +112,11 @@ class OpenAIClient(BaseApiClient):
             logger.debug(f"{self.log_prefix} (OpenAI) 检测到Grok平台，仅保留支持的参数")
 
         data = json.dumps(payload_dict).encode("utf-8")
+        authorization = self._normalize_authorization(generate_api_key)
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "Authorization": f"{generate_api_key}",
+            "Authorization": authorization,
         }
 
         # 详细调试信息
@@ -128,12 +130,7 @@ class OpenAIClient(BaseApiClient):
             # 创建安全的请求头副本，隐藏Authorization值
             safe_headers = headers.copy()
             if "Authorization" in safe_headers:
-                auth_value = safe_headers["Authorization"]
-                # 如果包含Bearer，保留Bearer前缀，隐藏其余部分
-                if auth_value.startswith("Bearer "):
-                    safe_headers["Authorization"] = "Bearer ***"
-                else:
-                    safe_headers["Authorization"] = "***"
+                safe_headers["Authorization"] = self._mask_authorization(safe_headers["Authorization"])
             logger.info(f"{self.log_prefix} (OpenAI) 详细调试 - 请求端点: {endpoint}")
             logger.info(f"{self.log_prefix} (OpenAI) 详细调试 - 请求头: {safe_headers}")
             logger.info(f"{self.log_prefix} (OpenAI) 详细调试 - 请求体: {json.dumps(safe_payload, ensure_ascii=False, indent=2)}")
@@ -209,6 +206,18 @@ class OpenAIClient(BaseApiClient):
                 else:
                     logger.error(f"{self.log_prefix} (OpenAI) API请求失败. 状态: {response.status}. 正文: {cleaned_response[:300]}...")
                     return False, f"图片API请求失败(状态码 {response.status})"
+        except urllib.error.HTTPError as e:
+            try:
+                error_body_bytes = e.read()
+                error_body = error_body_bytes.decode("utf-8", errors="replace")
+                cleaned_error_body = self._clean_response_body(error_body)
+            except Exception:
+                cleaned_error_body = ""
+            logger.error(
+                f"{self.log_prefix} (OpenAI) HTTP错误: status={getattr(e, 'code', 'unknown')}, "
+                f"body={cleaned_error_body[:500]}"
+            )
+            return False, f"图片API请求失败(状态码 {getattr(e, 'code', 'unknown')}): {cleaned_error_body[:180]}"
         except Exception as e:
             logger.error(f"{self.log_prefix} (OpenAI) 图片生成时意外错误: {e!r}", exc_info=True)
             traceback.print_exc()
