@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "name": "自定义智能多模型图片生成插件（custom_pic_plugin）",
-  "version": "3.3.10",
+  "version": "3.3.11",
   "description": "智能多模型图片生成插件，支持文生图和图生图自动识别。兼容OpenAI、豆包、Gemini、魔搭等多种API格式。提供命令式风格转换、模型配置管理、结果缓存等功能。支持动态模型切换、风格别名、调试开关等高级特性。",
   "author": {
     "name": "Ptrel，Rabbit-Jia-Er，saberlights Kiuon",
@@ -52,20 +52,20 @@
       {
         "type": "command",
         "name": "pic_generation_command",
-        "description": "风格化图生图命令：/dr <风格>",
-        "pattern": "/dr"
+        "description": "风格化图生图命令：/cp <风格>",
+        "pattern": "/cp"
       },
       {
         "type": "command",
         "name": "pic_config_command",
-        "description": "模型配置管理：/dr list、/dr set等",
-        "pattern": "/dr"
+        "description": "模型配置管理：/cp list、/cp set等",
+        "pattern": "/cp"
       },
       {
         "type": "command",
         "name": "pic_style_command",
-        "description": "风格管理：/dr styles、/dr style等",
-        "pattern": "/dr"
+        "description": "风格管理：/cp styles、/cp style等",
+        "pattern": "/cp"
       }
     ],
     "features": [
@@ -81,3 +81,4 @@
   },
   "id": "Ptrel，Rabbit-Jia-Er.custom_pic_plugin"
 }
+

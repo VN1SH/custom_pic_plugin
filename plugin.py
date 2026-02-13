@@ -47,7 +47,7 @@ class CustomPicPlugin(BasePlugin):
 
     # 插件基本信息
     plugin_name = "custom_pic_plugin"
-    plugin_version = "3.3.10"
+    plugin_version = "3.3.11"
     plugin_author = "Ptrel，Rabbit"
     enable_plugin = True
     dependencies: List[str] = []
@@ -189,7 +189,7 @@ class CustomPicPlugin(BasePlugin):
             ),
             "config_version": ConfigField(
                 type=str,
-                default="3.3.10",
+                default="3.3.11",
                 description="插件配置版本号",
                 disabled=True,
                 order=2
@@ -240,25 +240,25 @@ class CustomPicPlugin(BasePlugin):
             "enable_pic_command": ConfigField(
                 type=bool,
                 default=True,
-                description="是否启用风格化图生图Command功能，支持/dr <风格>命令",
+                description="是否启用风格化图生图Command功能，支持/cp <风格>命令",
                 order=2
             ),
             "enable_pic_config": ConfigField(
                 type=bool,
                 default=True,
-                description="是否启用模型配置管理命令，支持/dr list、/dr set等",
+                description="是否启用模型配置管理命令，支持/cp list、/cp set等",
                 order=3
             ),
             "enable_pic_style": ConfigField(
                 type=bool,
                 default=True,
-                description="是否启用风格管理命令，支持/dr styles、/dr style等",
+                description="是否启用风格管理命令，支持/cp styles、/cp style等",
                 order=4
             ),
             "pic_command_model": ConfigField(
                 type=str,
                 default="model1",
-                description="Command 默认使用的模型槽位。可在群内通过 /dr set 临时切换。",
+                description="Command 默认使用的模型槽位。可在群内通过 /cp set 临时切换。",
                 placeholder="model1",
                 choices=model_slot_choices,
                 input_type="select",
@@ -387,7 +387,7 @@ class CustomPicPlugin(BasePlugin):
             "auto_base_image_path": ConfigField(
                 type=str,
                 default="images/selfie_base_auto.png",
-                description="通过 /dr base add 保存的自拍底图路径（相对或绝对路径）",
+                description="通过 /cp base add 保存的自拍底图路径（相对或绝对路径）",
                 placeholder="images/selfie_base_auto.png",
                 depends_on="selfie.enabled",
                 depends_value=True,
@@ -937,3 +937,4 @@ class CustomPicPlugin(BasePlugin):
 # 在类加载阶段刷新动态槽位，确保 WebUI 读取到完整的下拉选项和模型分组。
 CustomPicPlugin._refresh_model_slot_schema()
 CustomPicPlugin._refresh_llm_slot_choices()
+

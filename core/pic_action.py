@@ -167,12 +167,12 @@ class Custom_Pic_Action(BaseAction):
         """执行统一图片生成动作"""
         logger.info(f"{self.log_prefix} 执行统一图片生成动作")
 
-        # 检查是否是 /dr 命令消息，如果是则跳过（由 Command 组件处理）
+        # 检查是否是 /cp 命令消息，如果是则跳过（由 Command 组件处理）
         if self.action_message and self.action_message.processed_plain_text:
             message_text = self.action_message.processed_plain_text.strip()
-            if message_text.startswith("/dr ") or message_text == "/dr":
-                logger.info(f"{self.log_prefix} 检测到 /dr 命令，跳过 Action 处理（由 Command 组件处理）")
-                return False, "跳过 /dr 命令"
+            if message_text.startswith("/cp ") or message_text == "/cp":
+                logger.info(f"{self.log_prefix} 检测到 /cp 命令，跳过 Action 处理（由 Command 组件处理）")
+                return False, "跳过 /cp 命令"
 
         # 检查插件是否在当前聊天流启用
         global_enabled = self.get_config("plugin.enabled", True)
@@ -259,7 +259,7 @@ class Custom_Pic_Action(BaseAction):
             require_base_image = self.get_config("selfie.require_base_image", True)
             reference_image = self._get_selfie_reference_image()
             if require_base_image and not reference_image:
-                await self.send_text("自拍底图未配置，无法执行自拍生图。请先引用图片并发送 /dr base add，或设置 selfie.reference_image_path。")
+                await self.send_text("自拍底图未配置，无法执行自拍生图。请先引用图片并发送 /cp base add，或设置 selfie.reference_image_path。")
                 return False, "自拍底图未配置"
 
             # 自拍生图优先使用底图（图生图）
@@ -1037,3 +1037,4 @@ class Custom_Pic_Action(BaseAction):
             cleaned_text = cleaned_text[:100]
             
         return cleaned_text
+

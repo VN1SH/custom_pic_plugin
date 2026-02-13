@@ -25,9 +25,9 @@ class PicGenerationCommand(BaseCommand):
 
     # Command基本信息
     command_name = "pic_generation_command"
-    command_description = "图生图命令，使用风格化提示词：/dr <风格> 或自然语言：/dr <描述>"
+    command_description = "图生图命令，使用风格化提示词：/cp <风格> 或自然语言：/cp <描述>"
     # 排除配置管理保留词，避免与 PicConfigCommand 和 PicStyleCommand 重复匹配
-    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?!list\b|models\b|config\b|set\b|reset\b|on\b|off\b|model\b|recall\b|default\b|base\b|styles\b|style\b|help\b)(?P<content>.+)$"
+    command_pattern = r"(?:.*，说：\s*)?/cp\s+(?!list\b|models\b|config\b|set\b|reset\b|on\b|off\b|model\b|recall\b|default\b|base\b|styles\b|style\b|help\b)(?P<content>.+)$"
 
     def get_config(self, key: str, default=None):
         """??????? modelX ??????? models.modelX?"""
@@ -103,7 +103,7 @@ class PicGenerationCommand(BaseCommand):
         content = self.matched_groups.get("content", "").strip()
 
         if not content:
-            await self.send_text("请指定风格或描述，格式：/dr <风格> 或 /dr <描述>\n可用：/dr styles 查看风格列表")
+            await self.send_text("请指定风格或描述，格式：/cp <风格> 或 /cp <描述>\n可用：/cp styles 查看风格列表")
             return False, "缺少内容参数", True
 
         # 检查是否是配置管理保留词，避免冲突
@@ -134,7 +134,7 @@ class PicGenerationCommand(BaseCommand):
             return await self._execute_natural_mode(content)
         else:
             # 短词且不包含动作词 → 可能是拼错的风格名，提示用户
-            await self.send_text(f"风格 '{content}' 不存在，使用 /dr styles 查看所有风格")
+            await self.send_text(f"风格 '{content}' 不存在，使用 /cp styles 查看所有风格")
             return False, f"风格 '{content}' 不存在", True
 
     async def _execute_style_mode(self, style_name: str, actual_style_name: str, style_prompt: str) -> Tuple[bool, Optional[str], bool]:
@@ -258,8 +258,8 @@ class PicGenerationCommand(BaseCommand):
         """执行自然语言模式（智能判断文生图/图生图）
 
         支持格式：
-        - /dr 画一只猫
-        - /dr 用model1画一只猫
+        - /cp 画一只猫
+        - /cp 用model1画一只猫
         """
         # 获取聊天流ID
         chat_id = self._get_chat_id()
@@ -639,8 +639,8 @@ class PicConfigCommand(BaseCommand):
 
     # Command基本信息
     command_name = "pic_config_command"
-    command_description = "图片生成配置管理：/dr <操作> [参数]"
-    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?P<action>list|models|config|set|reset|on|off|model|recall|default|base)(?:\s+(?P<params>.*))?$"
+    command_description = "图片生成配置管理：/cp <操作> [参数]"
+    command_pattern = r"(?:.*，说：\s*)?/cp\s+(?P<action>list|models|config|set|reset|on|off|model|recall|default|base)(?:\s+(?P<params>.*))?$"
 
     def get_config(self, key: str, default=None):
         """??????? modelX ??????? models.modelX?"""
@@ -743,11 +743,11 @@ class PicConfigCommand(BaseCommand):
         else:
             await self.send_text(
                 "配置管理命令使用方法：\n"
-                "/dr list - 列出所有可用模型\n"
-                "/dr config - 显示当前配置\n"
-                "/dr set <模型ID> - 设置图生图命令模型\n"
-                "/dr reset - 重置为默认配置\n"
-                "/dr base add|show|clear - 管理自拍底图（需引用图片）"
+                "/cp list - 列出所有可用模型\n"
+                "/cp config - 显示当前配置\n"
+                "/cp set <模型ID> - 设置图生图命令模型\n"
+                "/cp reset - 重置为默认配置\n"
+                "/cp base add|show|clear - 管理自拍底图（需引用图片）"
             )
             return False, "无效的操作参数", True
 
@@ -800,15 +800,15 @@ class PicConfigCommand(BaseCommand):
             # 管理员额外提示
             if is_admin:
                 message_lines.append("\n⚙️ 管理员命令：")
-                message_lines.append("• /dr on|off - 开关插件")
-                message_lines.append("• /dr model on|off <模型ID> - 开关模型")
-                message_lines.append("• /dr recall on|off <模型ID> - 开关撤回")
-                message_lines.append("• /dr default <模型ID> - 设置默认模型")
-                message_lines.append("• /dr set <模型ID> - 设置/dr命令模型")
-                message_lines.append("• /dr base add|show|clear - 管理自拍底图（引用图片）")
+                message_lines.append("• /cp on|off - 开关插件")
+                message_lines.append("• /cp model on|off <模型ID> - 开关模型")
+                message_lines.append("• /cp recall on|off <模型ID> - 开关撤回")
+                message_lines.append("• /cp default <模型ID> - 设置默认模型")
+                message_lines.append("• /cp set <模型ID> - 设置/cp命令模型")
+                message_lines.append("• /cp base add|show|clear - 管理自拍底图（引用图片）")
 
             # 图例说明
-            message_lines.append("\n📖 图例：✅默认 🔧/dr命令 🖼️图生图 📝仅文生图")
+            message_lines.append("\n📖 图例：✅默认 🔧/cp命令 🖼️图生图 📝仅文生图")
 
             message = "\n".join(message_lines)
             await self.send_text(message)
@@ -823,13 +823,13 @@ class PicConfigCommand(BaseCommand):
         """设置图生图命令使用的模型（Command组件）"""
         try:
             if not model_id:
-                await self.send_text("请指定模型ID，格式：/dr set <模型ID>")
+                await self.send_text("请指定模型ID，格式：/cp set <模型ID>")
                 return False, "缺少模型ID参数", True
 
             # 检查模型是否存在
             model_config = self.get_config(f"models.{model_id}")
             if not model_config:
-                await self.send_text(f"模型 '{model_id}' 不存在，请使用 /dr list 查看可用模型")
+                await self.send_text(f"模型 '{model_id}' 不存在，请使用 /cp list 查看可用模型")
                 return False, f"模型 '{model_id}' 不存在", True
 
             # 检查模型是否被禁用
@@ -863,10 +863,10 @@ class PicConfigCommand(BaseCommand):
             await self.send_text(
                 f"✅ 当前聊天流配置已重置！\n\n"
                 f"🎯 默认模型: {global_action_model}\n"
-                f"🔧 /dr命令模型: {global_command_model}\n"
+                f"🔧 /cp命令模型: {global_command_model}\n"
                 f"📋 所有模型已启用\n"
                 f"🔔 所有撤回已启用\n\n"
-                f"使用 /dr config 查看当前配置"
+                f"使用 /cp config 查看当前配置"
             )
 
             logger.info(f"{self.log_prefix} 聊天流 {chat_id} 配置已重置")
@@ -903,7 +903,7 @@ class PicConfigCommand(BaseCommand):
                 f"🔌 插件状态: {'✅ 启用' if plugin_enabled else '❌ 禁用'}",
                 f"🎯 默认模型: {action_model}",
                 f"   • 名称: {action_config.get('name', action_config.get('model', '未知')) if isinstance(action_config, dict) else '未知'}\n",
-                f"🔧 /dr命令模型: {command_model}",
+                f"🔧 /cp命令模型: {command_model}",
                 f"   • 名称: {command_config.get('name', command_config.get('model', '未知')) if isinstance(command_config, dict) else '未知'}",
             ]
 
@@ -916,13 +916,13 @@ class PicConfigCommand(BaseCommand):
             # 管理员命令提示
             message_lines.extend([
                 "\n📖 管理员命令：",
-                "• /dr on|off - 开关插件",
-                "• /dr model on|off <模型ID> - 开关模型",
-                "• /dr recall on|off <模型ID> - 开关撤回",
-                "• /dr default <模型ID> - 设置默认模型",
-                "• /dr set <模型ID> - 设置/dr命令模型",
-                "• /dr reset - 重置所有配置",
-                "• /dr base add|show|clear - 管理自拍底图（引用图片）"
+                "• /cp on|off - 开关插件",
+                "• /cp model on|off <模型ID> - 开关模型",
+                "• /cp recall on|off <模型ID> - 开关撤回",
+                "• /cp default <模型ID> - 设置默认模型",
+                "• /cp set <模型ID> - 设置/cp命令模型",
+                "• /cp reset - 重置所有配置",
+                "• /cp base add|show|clear - 管理自拍底图（引用图片）"
             ])
 
             message = "\n".join(message_lines)
@@ -962,13 +962,13 @@ class PicConfigCommand(BaseCommand):
             # 解析参数: on/off model_id
             parts = params.split(maxsplit=1)
             if len(parts) < 2:
-                await self.send_text("格式：/dr model on|off <模型ID>")
+                await self.send_text("格式：/cp model on|off <模型ID>")
                 return False, "参数不足", True
 
             action, model_id = parts[0].lower(), parts[1].strip()
 
             if action not in ["on", "off"]:
-                await self.send_text("格式：/dr model on|off <模型ID>")
+                await self.send_text("格式：/cp model on|off <模型ID>")
                 return False, "无效的操作", True
 
             # 检查模型是否存在
@@ -995,13 +995,13 @@ class PicConfigCommand(BaseCommand):
             # 解析参数: on/off model_id
             parts = params.split(maxsplit=1)
             if len(parts) < 2:
-                await self.send_text("格式：/dr recall on|off <模型ID>")
+                await self.send_text("格式：/cp recall on|off <模型ID>")
                 return False, "参数不足", True
 
             action, model_id = parts[0].lower(), parts[1].strip()
 
             if action not in ["on", "off"]:
-                await self.send_text("格式：/dr recall on|off <模型ID>")
+                await self.send_text("格式：/cp recall on|off <模型ID>")
                 return False, "无效的操作", True
 
             # 检查模型是否存在
@@ -1026,7 +1026,7 @@ class PicConfigCommand(BaseCommand):
         """设置Action组件的默认模型"""
         try:
             if not model_id:
-                await self.send_text("格式：/dr default <模型ID>")
+                await self.send_text("格式：/cp default <模型ID>")
                 return False, "缺少模型ID", True
 
             # 检查模型是否存在
@@ -1052,7 +1052,7 @@ class PicConfigCommand(BaseCommand):
             return False, f"设置默认模型失败: {str(e)}", True
 
     async def _manage_base_image(self, params: str) -> Tuple[bool, Optional[str], bool]:
-        """管理自拍底图：/dr base add|show|clear"""
+        """管理自拍底图：/cp base add|show|clear"""
         sub_action = (params or "").strip().split(maxsplit=1)[0].lower() if params else ""
         if not sub_action:
             sub_action = "show"
@@ -1066,9 +1066,9 @@ class PicConfigCommand(BaseCommand):
 
         await self.send_text(
             "底图命令格式：\n"
-            "/dr base add - 引用一张图片并设为自拍底图\n"
-            "/dr base show - 查看当前自拍底图状态\n"
-            "/dr base clear - 清除当前自拍底图"
+            "/cp base add - 引用一张图片并设为自拍底图\n"
+            "/cp base show - 查看当前自拍底图状态\n"
+            "/cp base clear - 清除当前自拍底图"
         )
         return False, f"无效的 base 子命令: {sub_action}", True
 
@@ -1076,7 +1076,7 @@ class PicConfigCommand(BaseCommand):
         """通过引用消息添加自拍底图"""
         image_base64 = await self._extract_quoted_image_base64()
         if not image_base64:
-            await self.send_text("请先在群聊中引用一张图片，再发送 /dr base add")
+            await self.send_text("请先在群聊中引用一张图片，再发送 /cp base add")
             return False, "未检测到引用图片", True
 
         saved_path = self._save_base64_image_to_auto_base(image_base64)
@@ -1361,8 +1361,8 @@ class PicStyleCommand(BaseCommand):
 
     # Command基本信息
     command_name = "pic_style_command"
-    command_description = "图片风格管理：/dr <操作> [参数]"
-    command_pattern = r"(?:.*，说：\s*)?/dr\s+(?P<action>styles|style|help)(?:\s+(?P<params>.*))?$"
+    command_description = "图片风格管理：/cp <操作> [参数]"
+    command_pattern = r"(?:.*，说：\s*)?/cp\s+(?P<action>styles|style|help)(?:\s+(?P<params>.*))?$"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         """执行风格管理命令"""
@@ -1390,9 +1390,9 @@ class PicStyleCommand(BaseCommand):
         else:
             await self.send_text(
                 "风格管理命令使用方法：\n"
-                "/dr styles - 列出所有可用风格\n"
-                "/dr style <风格名> - 显示风格详情\n"
-                "/dr help - 显示帮助信息"
+                "/cp styles - 列出所有可用风格\n"
+                "/cp style <风格名> - 显示风格详情\n"
+                "/cp help - 显示帮助信息"
             )
             return False, "无效的操作参数", True
 
@@ -1421,7 +1421,7 @@ class PicStyleCommand(BaseCommand):
 
                     message_lines.append(f"• {style_id}{alias_text}")
 
-            message_lines.append("\n💡 使用方法: /dr <风格名>")
+            message_lines.append("\n💡 使用方法: /cp <风格名>")
             message = "\n".join(message_lines)
             await self.send_text(message)
             return True, "风格列表查询成功", True
@@ -1435,7 +1435,7 @@ class PicStyleCommand(BaseCommand):
         """显示指定风格的详细信息"""
         try:
             if not style_name:
-                await self.send_text("请指定风格名，格式：/dr style <风格名>")
+                await self.send_text("请指定风格名，格式：/cp style <风格名>")
                 return False, "缺少风格名参数", True
 
             # 解析风格别名
@@ -1443,7 +1443,7 @@ class PicStyleCommand(BaseCommand):
             style_prompt = self.get_config(f"styles.{actual_style}")
 
             if not style_prompt:
-                await self.send_text(f"风格 '{style_name}' 不存在，请使用 /dr styles 查看可用风格")
+                await self.send_text(f"风格 '{style_name}' 不存在，请使用 /cp styles 查看可用风格")
                 return False, f"风格 '{style_name}' 不存在", True
 
             # 查找别名
@@ -1465,7 +1465,7 @@ class PicStyleCommand(BaseCommand):
 
             message_lines.extend([
                 "💡 使用方法：",
-                f"/dr {style_name}",
+                f"/cp {style_name}",
                 "\n⚠️ 注意：需要先发送一张图片作为输入"
             ])
 
@@ -1490,19 +1490,19 @@ class PicStyleCommand(BaseCommand):
 🎨 图片风格系统帮助
 
 📋 基本命令：
-• /dr <风格名> - 对最近的图片应用风格
-• /dr styles - 列出所有可用风格
-• /dr list - 查看所有模型
+• /cp <风格名> - 对最近的图片应用风格
+• /cp styles - 列出所有可用风格
+• /cp list - 查看所有模型
 
 ⚙️ 管理员命令：
-• /dr config - 查看当前配置
-• /dr set <模型ID> - 设置图生图模型
-• /dr reset - 重置为默认配置
-• /dr base add|show|clear - 管理自拍底图（引用图片）
+• /cp config - 查看当前配置
+• /cp set <模型ID> - 设置图生图模型
+• /cp reset - 重置为默认配置
+• /cp base add|show|clear - 管理自拍底图（引用图片）
 
 💡 使用流程：
 1. 发送一张图片
-2. 使用 /dr <风格名> 进行风格转换
+2. 使用 /cp <风格名> 进行风格转换
 3. 等待处理完成
                 """
             else:
@@ -1511,13 +1511,13 @@ class PicStyleCommand(BaseCommand):
 🎨 图片风格系统帮助
 
 📋 可用命令：
-• /dr <风格名> - 对最近的图片应用风格
-• /dr styles - 列出所有可用风格
-• /dr list - 查看所有模型
+• /cp <风格名> - 对最近的图片应用风格
+• /cp styles - 列出所有可用风格
+• /cp list - 查看所有模型
 
 💡 使用流程：
 1. 发送一张图片
-2. 使用 /dr <风格名> 进行风格转换
+2. 使用 /cp <风格名> 进行风格转换
 3. 等待处理完成
                 """
 
@@ -1561,3 +1561,4 @@ class PicStyleCommand(BaseCommand):
         except Exception as e:
             logger.error(f"{self.log_prefix} 解析风格别名失败: {e!r}")
             return style_name
+
