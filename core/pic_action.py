@@ -620,6 +620,8 @@ class Custom_Pic_Action(BaseAction):
                                         await self.send_text(f"{mode_text}完成！（已使用URL直发兜底）")
                                     await self._schedule_auto_recall_for_recent_message(model_config)
                                     return True, f"{mode_text}已完成(URL直发)"
+                                await self.send_text(f"图片已生成，但外链发送失败。原图链接：{final_image_data}")
+                                return False, f"图片处理失败: {encode_result}"
                             await self.send_text(f"获取到图片URL，但在处理图片时失败了：{encode_result}")
                             return False, f"图片处理失败: {encode_result}"
                     except Exception as e:

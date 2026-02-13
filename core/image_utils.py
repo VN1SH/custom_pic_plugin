@@ -279,49 +279,71 @@ class ImageProcessor:
                         api_key = f"Bearer {api_key}"
                     headers["Authorization"] = api_key
 
-                request_kwargs = {
-                    "url": image_url,
-                    "headers": headers,
-                    "timeout": 60,
-                    "allow_redirects": True
-                }
-
                 proxy_enabled = self.action.get_config("proxy.enabled", False)
                 if proxy_enabled:
                     proxy_url = self.action.get_config("proxy.url", "http://127.0.0.1:7890")
-                    request_kwargs["proxies"] = {
-                        "http": proxy_url,
-                        "https": proxy_url
-                    }
+
+                # 候选下载URL：先原始URL，再尝试替换为配置的base_url域名（同路径）
+                candidate_urls = [image_url]
+                if isinstance(model_config, dict):
+                    base_url_cfg = str(model_config.get("base_url", "") or "").strip()
+                    if base_url_cfg:
+                        try:
+                            src = urlsplit(image_url)
+                            base = urlsplit(base_url_cfg)
+                            if src.scheme and src.netloc and base.scheme and base.netloc and src.netloc != base.netloc:
+                                if src.path.startswith("/v1/files/"):
+                                    alt = f"{base.scheme}://{base.netloc}{src.path}"
+                                    if src.query:
+                                        alt = f"{alt}?{src.query}"
+                                    candidate_urls.append(alt)
+                        except Exception:
+                            pass
 
                 retry_status = {403, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
                 max_attempts = 3
-                for attempt in range(1, max_attempts + 1):
-                    try:
-                        response = requests.get(**request_kwargs)
-                    except Exception as req_err:
-                        if attempt >= max_attempts:
-                            return False, f"请求异常: {str(req_err)[:80]}"
-                        time.sleep(0.8 * attempt)
-                        continue
+                last_error = "下载失败"
+                for current_url in candidate_urls:
+                    request_kwargs = {
+                        "url": current_url,
+                        "headers": headers,
+                        "timeout": 60,
+                        "allow_redirects": True
+                    }
+                    if proxy_enabled:
+                        request_kwargs["proxies"] = {
+                            "http": proxy_url,
+                            "https": proxy_url
+                        }
 
-                    if response.status_code == 200 and response.content:
-                        image_bytes = response.content
-                        base64_encoded_image = base64.b64encode(image_bytes).decode("utf-8")
-                        logger.info(f"{self.log_prefix} (B64) 图片下载编码完成. Base64长度: {len(base64_encoded_image)}")
-                        return True, base64_encoded_image
+                    for attempt in range(1, max_attempts + 1):
+                        try:
+                            response = requests.get(**request_kwargs)
+                        except Exception as req_err:
+                            last_error = f"请求异常: {str(req_err)[:80]}"
+                            if attempt >= max_attempts:
+                                continue
+                            time.sleep(0.8 * attempt)
+                            continue
 
-                    body_preview = (response.text or "")[:120].replace("\n", " ")
-                    logger.warning(
-                        f"{self.log_prefix} (B64) 下载失败(尝试{attempt}/{max_attempts}): "
-                        f"HTTP {response.status_code}, body={body_preview}"
-                    )
-                    if response.status_code in retry_status and attempt < max_attempts:
-                        time.sleep(0.8 * attempt)
-                        continue
-                    return False, f"HTTP {response.status_code}"
+                        if response.status_code == 200 and response.content:
+                            image_bytes = response.content
+                            base64_encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+                            logger.info(f"{self.log_prefix} (B64) 图片下载编码完成. Base64长度: {len(base64_encoded_image)}")
+                            return True, base64_encoded_image
 
-                return False, "下载失败(重试耗尽)"
+                        body_preview = (response.text or "")[:120].replace("\n", " ")
+                        logger.warning(
+                            f"{self.log_prefix} (B64) 下载失败(尝试{attempt}/{max_attempts}): "
+                            f"HTTP {response.status_code}, url={current_url}, body={body_preview}"
+                        )
+                        last_error = f"HTTP {response.status_code} @{current_url}"
+                        if response.status_code in retry_status and attempt < max_attempts:
+                            time.sleep(0.8 * attempt)
+                            continue
+                        break
+
+                return False, last_error
                         
         except Exception as e:
             logger.error(f"{self.log_prefix} (B64) 处理图片时错误: {e!r}", exc_info=True)
