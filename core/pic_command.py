@@ -31,6 +31,8 @@ class PicGenerationCommand(BaseCommand):
 
     def get_config(self, key: str, default=None):
         """??????? modelX ??????? models.modelX?"""
+        if runtime_state.has_config_override(key):
+            return runtime_state.get_config_override(key, default)
         if key in PicGenerationCommand._config_overrides:
             return PicGenerationCommand._config_overrides[key]
 
@@ -642,6 +644,8 @@ class PicConfigCommand(BaseCommand):
 
     def get_config(self, key: str, default=None):
         """??????? modelX ??????? models.modelX?"""
+        if runtime_state.has_config_override(key):
+            return runtime_state.get_config_override(key, default)
         if key in PicGenerationCommand._config_overrides:
             return PicGenerationCommand._config_overrides[key]
 
@@ -1291,6 +1295,7 @@ class PicConfigCommand(BaseCommand):
             selfie["reference_image_path"] = relative_path
             manager.save_config(config)
             PicGenerationCommand._config_overrides["selfie.reference_image_path"] = relative_path
+            runtime_state.set_config_override("selfie.reference_image_path", relative_path)
         except Exception as e:
             logger.warning(f"{self.log_prefix} 持久化自拍底图路径失败: {e!r}")
 
@@ -1314,6 +1319,7 @@ class PicConfigCommand(BaseCommand):
             selfie["reference_image_path"] = ""
             manager.save_config(config)
             PicGenerationCommand._config_overrides["selfie.reference_image_path"] = ""
+            runtime_state.set_config_override("selfie.reference_image_path", "")
         except Exception as e:
             logger.warning(f"{self.log_prefix} 清理自拍底图路径失败: {e!r}")
 

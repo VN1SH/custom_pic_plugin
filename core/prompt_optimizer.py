@@ -248,7 +248,7 @@ class PromptOptimizer:
         text = (message_text or "").strip()
         context_text = (scene_context or "").strip()
         if not text:
-            return False, "EMPTY"
+            return False, "ERROR_EMPTY_MESSAGE"
 
         audit_prompt = (
             "你是群聊内容审核器。你的任务是判断下面这条请求，是否在明确要求机器人“麦麦本人”发自拍/照片。\n\n"
@@ -270,8 +270,12 @@ class PromptOptimizer:
                 model_name=model_name,
                 fallback_keys=fallback_keys
             )
-            if not success or not response:
-                return False, "NO"
+            if not success:
+                logger.warning(f"{self.log_prefix} 自拍审核模型调用失败: {used_model_key or 'unknown'}")
+                return False, "ERROR_AUDIT_CALL_FAILED"
+            if not response:
+                return False, "ERROR_AUDIT_EMPTY_RESPONSE"
+
             cleaned = response.strip().upper()
             if "YES" in cleaned and "NO" not in cleaned:
                 return True, response
@@ -280,7 +284,7 @@ class PromptOptimizer:
             return False, response
         except Exception as e:
             logger.error(f"{self.log_prefix} 自拍审核异常: {e}")
-            return False, "NO"
+            return False, "ERROR_AUDIT_EXCEPTION"
 
     def _clean_response(self, response: str) -> str:
         """清理 LLM 响应

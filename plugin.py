@@ -47,7 +47,7 @@ class CustomPicPlugin(BasePlugin):
 
     # 插件基本信息
     plugin_name = "custom_pic_plugin"
-    plugin_version = "3.3.9"
+    plugin_version = "3.3.10"
     plugin_author = "Ptrel，Rabbit"
     enable_plugin = True
     dependencies: List[str] = []
@@ -189,7 +189,7 @@ class CustomPicPlugin(BasePlugin):
             ),
             "config_version": ConfigField(
                 type=str,
-                default="3.3.9",
+                default="3.3.10",
                 description="插件配置版本号",
                 disabled=True,
                 order=2
@@ -446,6 +446,14 @@ class CustomPicPlugin(BasePlugin):
                 depends_value=True,
                 order=8
             ),
+            "audit_fail_fallback_rule": ConfigField(
+                type=bool,
+                default=True,
+                description="当审核模型调用失败时，是否回退到规则审核（仅在消息中显式出现麦麦别名时通过）",
+                depends_on="selfie.enabled",
+                depends_value=True,
+                order=9
+            ),
             "scene_prompt_model_name": ConfigField(
                 type=str,
                 default="replyer",
@@ -454,7 +462,7 @@ class CustomPicPlugin(BasePlugin):
                 input_type="select",
                 depends_on="selfie.enabled",
                 depends_value=True,
-                order=9
+                order=10
             ),
             "use_replyer_scene_prompt": ConfigField(
                 type=bool,
@@ -462,7 +470,7 @@ class CustomPicPlugin(BasePlugin):
                 description="是否启用自拍场景提示词模型（按上方槽位生成）",
                 depends_on="selfie.enabled",
                 depends_value=True,
-                order=10
+                order=11
             ),
             "bot_aliases": ConfigField(
                 type=str,
@@ -471,7 +479,7 @@ class CustomPicPlugin(BasePlugin):
                 placeholder="麦麦,maimai,mai",
                 depends_on="selfie.enabled",
                 depends_value=True,
-                order=11
+                order=12
             ),
             "scene_context_limit": ConfigField(
                 type=int,
@@ -481,7 +489,7 @@ class CustomPicPlugin(BasePlugin):
                 max=30,
                 depends_on="selfie.enabled",
                 depends_value=True,
-                order=12
+                order=13
             )
         },
         "auto_recall": {

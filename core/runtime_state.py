@@ -40,6 +40,7 @@ class RuntimeStateManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._states: Dict[str, ChatStreamState] = {}
+            cls._instance._config_overrides: Dict[str, Any] = {}
         return cls._instance
 
     def _get_state(self, chat_id: str) -> ChatStreamState:
@@ -190,6 +191,27 @@ class RuntimeStateManager:
             "action_default_model": state.action_default_model,
             "command_default_model": state.command_default_model,
         }
+
+    # ==================== 配置覆盖 ====================
+
+    def has_config_override(self, key: str) -> bool:
+        """判断是否存在指定配置覆盖。"""
+        return key in self._config_overrides
+
+    def get_config_override(self, key: str, default: Any = None) -> Any:
+        """获取配置覆盖值。"""
+        return self._config_overrides.get(key, default)
+
+    def set_config_override(self, key: str, value: Any) -> None:
+        """设置配置覆盖值。"""
+        self._config_overrides[key] = value
+        logger.info(f"[RuntimeState] 设置配置覆盖: {key}={value!r}")
+
+    def clear_config_override(self, key: str) -> None:
+        """清理指定配置覆盖值。"""
+        if key in self._config_overrides:
+            del self._config_overrides[key]
+            logger.info(f"[RuntimeState] 清理配置覆盖: {key}")
 
 
 # 全局单例

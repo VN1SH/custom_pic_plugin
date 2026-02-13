@@ -114,6 +114,9 @@ class Custom_Pic_Action(BaseAction):
 
     def get_config(self, key: str, default=None):
         """??????? modelX ??????? models.modelX?"""
+        if runtime_state.has_config_override(key):
+            return runtime_state.get_config_override(key, default)
+
         if key == "models":
             models = self._collect_model_configs()
             if models:
@@ -339,6 +342,31 @@ class Custom_Pic_Action(BaseAction):
 
         return True
 
+    def _fallback_selfie_target_audit(self, message_text: str) -> bool:
+        """审核模型不可用时的保守回退：必须显式提到麦麦别名。"""
+        text = (message_text or "").strip()
+        if not text:
+            return False
+        if not self._rule_based_selfie_audit(text):
+            return False
+
+        lowered = text.lower()
+        aliases_raw = str(self.get_config("selfie.bot_aliases", "麦麦,maimai,mai") or "")
+        alias_list = []
+        seen = set()
+        for item in aliases_raw.split(","):
+            alias = item.strip().lower()
+            if alias and alias not in seen:
+                seen.add(alias)
+                alias_list.append(alias)
+        for default_alias in ("麦麦", "maimai", "mai"):
+            if default_alias not in seen:
+                alias_list.append(default_alias)
+                seen.add(default_alias)
+
+        # 为避免误判“向他人索要照片”，回退审核要求消息中明确出现麦麦别名。
+        return any(alias in lowered for alias in alias_list)
+
     async def _audit_selfie_intent(self, message_text: str) -> bool:
         """自拍审核总流程：规则预筛 + 主程序 planer/planner 判定对象是否为麦麦本人。"""
         strict_audit = self.get_config("selfie.strict_audit_enabled", True)
@@ -365,6 +393,17 @@ class Custom_Pic_Action(BaseAction):
             log_prefix=self.log_prefix
         )
         logger.info(f"{self.log_prefix} 自拍二次审核结果: {passed}, 响应: {str(raw)[:30]}")
+        if passed:
+            return True
+
+        fallback_on_error = bool(self.get_config("selfie.audit_fail_fallback_rule", True))
+        raw_text = str(raw or "")
+        if fallback_on_error and raw_text.startswith("ERROR_"):
+            fallback_passed = self._fallback_selfie_target_audit(message_text)
+            logger.warning(
+                f"{self.log_prefix} 自拍审核模型异常，启用规则回退: {fallback_passed}, 原因: {raw_text}"
+            )
+            return fallback_passed
         return passed
 
     async def _build_selfie_description_with_scene(self, description: str, message_text: str) -> str:
@@ -998,4 +1037,3 @@ class Custom_Pic_Action(BaseAction):
             cleaned_text = cleaned_text[:100]
             
         return cleaned_text
-
