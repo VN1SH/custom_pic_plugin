@@ -47,7 +47,7 @@ class CustomPicPlugin(BasePlugin):
 
     # 插件基本信息
     plugin_name = "custom_pic_plugin"
-    plugin_version = "3.3.8"
+    plugin_version = "3.3.9"
     plugin_author = "Ptrel，Rabbit"
     enable_plugin = True
     dependencies: List[str] = []
@@ -189,7 +189,7 @@ class CustomPicPlugin(BasePlugin):
             ),
             "config_version": ConfigField(
                 type=str,
-                default="3.3.8",
+                default="3.3.9",
                 description="插件配置版本号",
                 disabled=True,
                 order=2
@@ -664,7 +664,6 @@ class CustomPicPlugin(BasePlugin):
         
         # 检查并更新配置（如果需要），传入原始配置
         self._enhance_config_management(original_config)
-        self._attach_runtime_models_alias()
 
     @classmethod
     def _refresh_llm_slot_choices(cls):
@@ -782,37 +781,6 @@ class CustomPicPlugin(BasePlugin):
 
         return normalized
 
-    def _attach_runtime_models_alias(self):
-        """运行时兼容：将顶层 modelX 组装为 models.modelX 供旧逻辑读取。"""
-        if not isinstance(self.config, dict):
-            return
-
-        slot_ids = self._get_model_slot_ids()
-        models_section = self.config.get("models")
-        non_model_fields: Dict[str, Any] = {}
-        if isinstance(models_section, dict):
-            non_model_fields = {
-                k: v for k, v in models_section.items()
-                if not (k.startswith("model") and isinstance(v, dict))
-            }
-
-        alias_models: Dict[str, Dict[str, Any]] = {}
-        for model_id in slot_ids:
-            model_cfg = self.config.get(model_id)
-            if isinstance(model_cfg, dict):
-                alias_models[model_id] = model_cfg
-
-        if isinstance(models_section, dict):
-            for model_id in slot_ids:
-                legacy_cfg = models_section.get(model_id)
-                if isinstance(legacy_cfg, dict) and model_id not in alias_models:
-                    alias_models[model_id] = legacy_cfg
-                    self.config[model_id] = legacy_cfg
-
-        merged_models = dict(non_model_fields)
-        merged_models.update(alias_models)
-        self.config["models"] = merged_models
-    
     def _enhance_config_management(self, original_config=None):
         """增强配置管理：备份、版本检查、智能合并
         

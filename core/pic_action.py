@@ -112,6 +112,47 @@ class Custom_Pic_Action(BaseAction):
         self.cache_manager = CacheManager(self)
         self._api_clients = {}  # 缓存不同格式的API客户端
 
+    def get_config(self, key: str, default=None):
+        """??????? modelX ??????? models.modelX?"""
+        if key == "models":
+            models = self._collect_model_configs()
+            if models:
+                return models
+
+        if key.startswith("models."):
+            model_id = key.split(".", 1)[1]
+            if model_id.startswith("model"):
+                model_cfg = self._resolve_model_config(model_id)
+                if isinstance(model_cfg, dict):
+                    return model_cfg
+
+        return super().get_config(key, default)
+
+    def _resolve_model_config(self, model_id: str) -> Optional[Dict[str, Any]]:
+        top_level_cfg = super().get_config(model_id, None)
+        if isinstance(top_level_cfg, dict):
+            return top_level_cfg
+        legacy_cfg = super().get_config(f"models.{model_id}", None)
+        if isinstance(legacy_cfg, dict):
+            return legacy_cfg
+        return None
+
+    def _collect_model_configs(self) -> Dict[str, Dict[str, Any]]:
+        models: Dict[str, Dict[str, Any]] = {}
+        legacy_models = super().get_config("models", {})
+        if isinstance(legacy_models, dict):
+            for key, value in legacy_models.items():
+                if key.startswith("model") and isinstance(value, dict):
+                    models[key] = value
+
+        for idx in range(1, 21):
+            model_id = f"model{idx}"
+            cfg = super().get_config(model_id, None)
+            if isinstance(cfg, dict):
+                models[model_id] = cfg
+
+        return models
+
     def _get_api_client(self, api_format: str):
         """获取指定格式的API客户端（带缓存）"""
         if api_format not in self._api_clients:

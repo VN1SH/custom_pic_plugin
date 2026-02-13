@@ -30,12 +30,48 @@ class PicGenerationCommand(BaseCommand):
     command_pattern = r"(?:.*，说：\s*)?/dr\s+(?!list\b|models\b|config\b|set\b|reset\b|on\b|off\b|model\b|recall\b|default\b|base\b|styles\b|style\b|help\b)(?P<content>.+)$"
 
     def get_config(self, key: str, default=None):
-        """覆盖get_config方法以支持动态配置"""
-        # 检查是否有配置覆盖
-        if key in self._config_overrides:
-            return self._config_overrides[key]
-        # 否则使用父类的get_config
+        """??????? modelX ??????? models.modelX?"""
+        if key in PicGenerationCommand._config_overrides:
+            return PicGenerationCommand._config_overrides[key]
+
+        if key == "models":
+            models = self._collect_model_configs()
+            if models:
+                return models
+
+        if key.startswith("models."):
+            model_id = key.split(".", 1)[1]
+            if model_id.startswith("model"):
+                model_cfg = self._resolve_model_config(model_id)
+                if isinstance(model_cfg, dict):
+                    return model_cfg
+
         return super().get_config(key, default)
+
+    def _resolve_model_config(self, model_id: str) -> Optional[Dict[str, Any]]:
+        top_level_cfg = super().get_config(model_id, None)
+        if isinstance(top_level_cfg, dict):
+            return top_level_cfg
+        legacy_cfg = super().get_config(f"models.{model_id}", None)
+        if isinstance(legacy_cfg, dict):
+            return legacy_cfg
+        return None
+
+    def _collect_model_configs(self) -> Dict[str, Dict[str, Any]]:
+        models: Dict[str, Dict[str, Any]] = {}
+        legacy_models = super().get_config("models", {})
+        if isinstance(legacy_models, dict):
+            for key, value in legacy_models.items():
+                if key.startswith("model") and isinstance(value, dict):
+                    models[key] = value
+
+        for idx in range(1, 21):
+            model_id = f"model{idx}"
+            cfg = super().get_config(model_id, None)
+            if isinstance(cfg, dict):
+                models[model_id] = cfg
+
+        return models
 
     def _get_chat_id(self) -> Optional[str]:
         """获取当前聊天流ID"""
@@ -605,12 +641,48 @@ class PicConfigCommand(BaseCommand):
     command_pattern = r"(?:.*，说：\s*)?/dr\s+(?P<action>list|models|config|set|reset|on|off|model|recall|default|base)(?:\s+(?P<params>.*))?$"
 
     def get_config(self, key: str, default=None):
-        """使用与PicGenerationCommand相同的配置覆盖"""
-        # 检查PicGenerationCommand的配置覆盖
+        """??????? modelX ??????? models.modelX?"""
         if key in PicGenerationCommand._config_overrides:
             return PicGenerationCommand._config_overrides[key]
-        # 否则使用父类的get_config
+
+        if key == "models":
+            models = self._collect_model_configs()
+            if models:
+                return models
+
+        if key.startswith("models."):
+            model_id = key.split(".", 1)[1]
+            if model_id.startswith("model"):
+                model_cfg = self._resolve_model_config(model_id)
+                if isinstance(model_cfg, dict):
+                    return model_cfg
+
         return super().get_config(key, default)
+
+    def _resolve_model_config(self, model_id: str) -> Optional[Dict[str, Any]]:
+        top_level_cfg = super().get_config(model_id, None)
+        if isinstance(top_level_cfg, dict):
+            return top_level_cfg
+        legacy_cfg = super().get_config(f"models.{model_id}", None)
+        if isinstance(legacy_cfg, dict):
+            return legacy_cfg
+        return None
+
+    def _collect_model_configs(self) -> Dict[str, Dict[str, Any]]:
+        models: Dict[str, Dict[str, Any]] = {}
+        legacy_models = super().get_config("models", {})
+        if isinstance(legacy_models, dict):
+            for key, value in legacy_models.items():
+                if key.startswith("model") and isinstance(value, dict):
+                    models[key] = value
+
+        for idx in range(1, 21):
+            model_id = f"model{idx}"
+            cfg = super().get_config(model_id, None)
+            if isinstance(cfg, dict):
+                models[model_id] = cfg
+
+        return models
 
     def _get_chat_id(self) -> Optional[str]:
         """获取当前聊天流ID"""
