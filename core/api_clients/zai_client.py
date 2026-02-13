@@ -252,9 +252,15 @@ class ZaiClient(BaseApiClient):
         if self._looks_like_base64(stripped):
             return stripped
 
-        url_match = re.search(r"https?://\S+", stripped)
+        # 优先提取 Markdown 图片/链接中的 URL：![alt](url) 或 [text](url)
+        md_match = re.search(r"!\[[^\]]*\]\((https?://[^\)\s]+)\)|\[[^\]]*\]\((https?://[^\)\s]+)\)", stripped)
+        if md_match:
+            return (md_match.group(1) or md_match.group(2) or "").strip()
+
+        # 兜底：提取纯文本 URL，并去掉常见尾部标点
+        url_match = re.search(r"https?://[^\s\]\"'<>]+", stripped)
         if url_match:
-            return url_match.group(0).rstrip('",\'')
+            return url_match.group(0).rstrip('",\').;!?]')
 
         return None
 
