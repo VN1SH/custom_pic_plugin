@@ -47,7 +47,7 @@ class CustomPicPlugin(BasePlugin):
 
     # 插件基本信息
     plugin_name = "custom_pic_plugin"
-    plugin_version = "3.3.6"
+    plugin_version = "3.3.7"
     plugin_author = "Ptrel，Rabbit"
     enable_plugin = True
     dependencies: List[str] = []
@@ -55,78 +55,80 @@ class CustomPicPlugin(BasePlugin):
     config_file_name = "config.toml"
     llm_slot_choices = _discover_llm_slot_choices()
     webui_model_slots = 5
+    model_slot_choices = [f"model{i}" for i in range(1, webui_model_slots + 1)]
 
-    # 配置节元数据
+    # 配置分组元数据（WebUI 展示）
     config_section_descriptions = {
         "plugin": ConfigSection(
-            title="插件启用配置",
+            title="插件基础",
             icon="info",
             order=1
         ),
         "generation": ConfigSection(
-            title="图片生成默认配置",
+            title="默认生图模型",
             icon="image",
             order=2
         ),
         "components": ConfigSection(
-            title="组件启用配置",
+            title="功能开关",
             icon="puzzle-piece",
             order=3
         ),
-        "proxy": ConfigSection(
-            title="代理设置",
-            icon="globe",
+        "selfie": ConfigSection(
+            title="自拍审核与底图",
+            icon="camera",
             order=4
         ),
-        "cache": ConfigSection(
-            title="结果缓存配置",
-            icon="database",
+        "prompt_optimizer": ConfigSection(
+            title="提示词优化",
+            description="将用户描述优化为更适合生图模型的提示词。",
+            icon="wand-2",
             order=5
         ),
-        "selfie": ConfigSection(
-            title="自拍模式配置",
-            icon="camera",
+        "auto_recall": ConfigSection(
+            title="自动撤回",
+            icon="trash",
             order=6
         ),
-        "auto_recall": ConfigSection(
-            title="自动撤回配置",
-            icon="trash",
-            order=7
-        ),
-        "prompt_optimizer": ConfigSection(
-            title="提示词优化器",
-            description="使用 MaiBot 主 LLM 将用户描述优化为专业绘画提示词",
-            icon="wand-2",
-            order=8
-        ),
         "styles": ConfigSection(
-            title="风格定义",
-            description="预设风格的提示词。添加更多风格请直接编辑 config.toml，格式：风格英文名 = \"提示词\"",
+            title="风格提示词",
+            description="可在 WebUI 直接维护常用风格提示词。",
             icon="palette",
-            order=9
+            order=7
         ),
         "style_aliases": ConfigSection(
             title="风格别名",
-            description="风格的中文别名映射。添加更多别名请直接编辑 config.toml",
+            description="把中文别名映射到 styles 中的英文风格键。",
             icon="tag",
+            order=8
+        ),
+        "proxy": ConfigSection(
+            title="代理网络",
+            icon="globe",
+            order=9
+        ),
+        "cache": ConfigSection(
+            title="结果缓存",
+            icon="database",
             order=10
         ),
-        "logging": ConfigSection(
-            title="日志配置",
-            icon="file-text",
-            collapsed=True,
+        "models": ConfigSection(
+            title="模型总览",
+            description="在下方模型分组中填写每个模型的 base_url、api_key、format、model。",
+            icon="cpu",
             order=11
         ),
-        "models": ConfigSection(
-            title="多模型配置",
-            description="添加更多模型请直接编辑 config.toml，复制 [models.model1] 整节并改名为 model2、model3 等",
-            icon="cpu",
+        "models.model1": ConfigSection(
+            title="模型1",
+            description="API 地址和密钥就在本分组：base_url 与 api_key。",
+            icon="box",
             order=12
         ),
-        "models.model1": ConfigSection(
-            title="模型1配置",
-            icon="box",
-            order=13
+        "logging": ConfigSection(
+            title="日志",
+            icon="file-text",
+            collapsed=True,
+            order=99
         ),
     }
 
@@ -136,33 +138,33 @@ class CustomPicPlugin(BasePlugin):
         tabs=[
             ConfigTab(
                 id="basic",
-                title="基础设置",
+                title="基础",
                 sections=["plugin", "generation", "components"],
                 icon="settings"
             ),
             ConfigTab(
-                id="network",
-                title="网络配置",
-                sections=["proxy", "cache"],
-                icon="wifi"
-            ),
-            ConfigTab(
-                id="features",
-                title="功能配置",
-                sections=["selfie", "auto_recall", "prompt_optimizer"],
-                icon="zap"
+                id="selfie",
+                title="自拍",
+                sections=["selfie", "prompt_optimizer", "auto_recall"],
+                icon="camera"
             ),
             ConfigTab(
                 id="styles",
-                title="风格管理",
+                title="风格",
                 sections=["styles", "style_aliases"],
                 icon="palette"
             ),
             ConfigTab(
                 id="models",
-                title="模型管理",
+                title="模型",
                 sections=["models", "models.model1"],
                 icon="cpu"
+            ),
+            ConfigTab(
+                id="network",
+                title="网络",
+                sections=["proxy", "cache"],
+                icon="wifi"
             ),
             ConfigTab(
                 id="advanced",
@@ -187,7 +189,7 @@ class CustomPicPlugin(BasePlugin):
             ),
             "config_version": ConfigField(
                 type=str,
-                default="3.3.6",
+                default="3.3.7",
                 description="插件配置版本号",
                 disabled=True,
                 order=2
@@ -203,8 +205,9 @@ class CustomPicPlugin(BasePlugin):
             "default_model": ConfigField(
                 type=str,
                 default="model1",
-                description="默认使用的模型ID，用于智能图片生成。支持文生图和图生图自动识别",
+                description="Action 默认使用的模型槽位。请在“模型”页维护各槽位的 base_url、api_key、format、model。",
                 placeholder="model1",
+                choices=model_slot_choices,
                 order=1
             ),
         },
@@ -254,8 +257,9 @@ class CustomPicPlugin(BasePlugin):
             "pic_command_model": ConfigField(
                 type=str,
                 default="model1",
-                description="Command组件使用的模型ID，可通过/dr set命令动态切换",
+                description="Command 默认使用的模型槽位。可在群内通过 /dr set 临时切换。",
                 placeholder="model1",
+                choices=model_slot_choices,
                 order=5
             ),
             "enable_debug_info": ConfigField(
@@ -332,8 +336,8 @@ class CustomPicPlugin(BasePlugin):
         "styles": {
             "hint": ConfigField(
                 type=str,
-                default="添加更多风格：编辑 config.toml，在 [styles] 节下添加 风格英文名 = \"提示词\"",
-                description="配置说明",
+                default="可直接在下方继续添加风格键值；键为风格名，值为提示词。",
+                description="填写说明",
                 disabled=True,
                 order=0
             ),
@@ -349,8 +353,8 @@ class CustomPicPlugin(BasePlugin):
         "style_aliases": {
             "hint": ConfigField(
                 type=str,
-                default="添加更多别名：编辑 config.toml，在 [style_aliases] 节下添加 风格英文名 = \"中文别名\"",
-                description="配置说明",
+                default="可直接在下方添加别名映射；键为风格名，值为中文别名（可逗号分隔多个别名）。",
+                description="填写说明",
                 disabled=True,
                 order=0
             ),
@@ -502,8 +506,8 @@ class CustomPicPlugin(BasePlugin):
         "models": {
             "hint": ConfigField(
                 type=str,
-                default="添加更多模型：编辑 config.toml，复制 [models.model1] 整节并改名为 model2、model3 等",
-                description="配置说明",
+                default="请在下方“模型1/模型2...”分组填写：base_url、api_key、format、model。可直接在 WebUI 配置。",
+                description="填写说明",
                 disabled=True,
                 order=1
             )
@@ -512,14 +516,14 @@ class CustomPicPlugin(BasePlugin):
         "models.model1": {
             "name": ConfigField(
                 type=str,
-                default="魔搭潦草模型",
-                description="模型显示名称，在模型列表中展示，版本更新后请手动从 old 目录恢复配置",
+                default="默认模型1",
+                description="模型显示名称，仅用于列表识别。",
                 order=1
             ),
             "base_url": ConfigField(
                 type=str,
                 default="https://api-inference.modelscope.cn/v1",
-                description="API服务地址。示例: OpenAI=https://api.openai.com/v1, 硅基流动=https://api.siliconflow.cn/v1, 豆包=https://ark.cn-beijing.volces.com/api/v3, 魔搭=https://api-inference.modelscope.cn/v1, Gemini=https://generativelanguage.googleapis.com",
+                description="生图 API 的 Base URL（例如 https://api.openai.com/v1）。",
                 required=True,
                 placeholder="https://api.example.com/v1",
                 order=2
@@ -527,7 +531,7 @@ class CustomPicPlugin(BasePlugin):
             "api_key": ConfigField(
                 type=str,
                 default="Bearer xxxxxxxxxxxxxxxxxxxxxx",
-                description="API密钥。OpenAI/modelscope格式需'Bearer '前缀，豆包/Gemini格式无需前缀",
+                description="生图 API 密钥。OpenAI 类接口通常需要 Bearer 前缀，部分服务无需前缀。",
                 input_type="password",
                 required=True,
                 placeholder="Bearer sk-xxx 或 sk-xxx",
@@ -677,6 +681,23 @@ class CustomPicPlugin(BasePlugin):
         if not isinstance(template, dict):
             return
 
+        model_slot_choices = [f"model{i}" for i in range(1, max_slots + 1)]
+        cls.model_slot_choices = model_slot_choices
+
+        generation_schema = cls.config_schema.get("generation", {})
+        default_model_field = generation_schema.get("default_model") if isinstance(generation_schema, dict) else None
+        if isinstance(default_model_field, ConfigField):
+            default_model_field.choices = model_slot_choices
+            if default_model_field.default not in model_slot_choices:
+                default_model_field.default = model_slot_choices[0]
+
+        components_schema = cls.config_schema.get("components", {})
+        command_model_field = components_schema.get("pic_command_model") if isinstance(components_schema, dict) else None
+        if isinstance(command_model_field, ConfigField):
+            command_model_field.choices = model_slot_choices
+            if command_model_field.default not in model_slot_choices:
+                command_model_field.default = model_slot_choices[0]
+
         section_ids = [f"models.model{i}" for i in range(1, max_slots + 1)]
         for idx, section_id in enumerate(section_ids, start=1):
             if section_id not in cls.config_schema:
@@ -688,20 +709,26 @@ class CustomPicPlugin(BasePlugin):
 
             if section_id not in cls.config_section_descriptions:
                 cls.config_section_descriptions[section_id] = ConfigSection(
-                    title=f"模型{idx}配置",
+                    title=f"模型{idx}",
+                    description="填写本模型的 base_url、api_key、format、model。",
                     icon="box",
                     order=12 + idx
                 )
 
         models_section = cls.config_section_descriptions.get("models")
         if isinstance(models_section, ConfigSection):
-            models_section.description = f"可在 WebUI 直接编辑 model1-model{max_slots}"
+            models_section.description = (
+                f"在下方模型分组中填写 model1-model{max_slots} 的 base_url、api_key、format、model。"
+            )
 
         models_schema = cls.config_schema.get("models")
         if isinstance(models_schema, dict):
             hint_field = models_schema.get("hint")
             if isinstance(hint_field, ConfigField):
-                hint_field.default = f"WebUI 可直接编辑 model1-model{max_slots}；需要更多模型时再手动编辑 config.toml"
+                hint_field.default = (
+                    f"可直接在 WebUI 配置 model1-model{max_slots}。"
+                    "若需要更多模型，请复制 [models.model1] 后命名为 model6、model7..."
+                )
 
         for tab in cls.config_layout.tabs:
             if getattr(tab, "id", "") == "models":
@@ -844,3 +871,8 @@ class CustomPicPlugin(BasePlugin):
             components.append((PicGenerationCommand.get_command_info(), PicGenerationCommand))
 
         return components
+
+
+# 在类加载阶段刷新动态槽位，确保 WebUI 读取到完整的下拉选项和模型分组。
+CustomPicPlugin._refresh_model_slot_schema()
+CustomPicPlugin._refresh_llm_slot_choices()
