@@ -17,6 +17,11 @@ class ZaiClient(BaseApiClient):
 
     format_name = "zai"
 
+    def _is_grok_imagine_model(self, model: str) -> bool:
+        """是否为 grok 图片模型。"""
+        model_lower = (model or "").strip().lower()
+        return "grok" in model_lower and "imagine" in model_lower
+
     def _make_request(
         self,
         prompt: str,
@@ -29,6 +34,7 @@ class ZaiClient(BaseApiClient):
         base_url = model_config.get("base_url", "https://zai.is/api").rstrip('/')
         api_key = model_config.get("api_key", "")
         model = model_config.get("model", "")
+        minimal_mode = self._is_grok_imagine_model(model)
 
         endpoint = f"{base_url}/chat/completions"
 
@@ -36,38 +42,46 @@ class ZaiClient(BaseApiClient):
         custom_prompt_add = model_config.get("custom_prompt_add", "")
         full_prompt = prompt + custom_prompt_add
 
-        # 构造 messages
-        contents = [{"type": "text", "text": full_prompt}]
-        if input_image_base64:
-            image_data_uri = self._prepare_image_data_uri(input_image_base64)
-            contents.append({
-                "type": "image_url",
-                "image_url": {"url": image_data_uri}
-            })
+        # 构造 messages：grok-imagine 使用最小 payload，减少网关/上游兼容问题
+        if minimal_mode and not input_image_base64:
+            messages = [{"role": "user", "content": full_prompt}]
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": False,
+            }
+        else:
+            contents = [{"type": "text", "text": full_prompt}]
+            if input_image_base64:
+                image_data_uri = self._prepare_image_data_uri(input_image_base64)
+                contents.append({
+                    "type": "image_url",
+                    "image_url": {"url": image_data_uri}
+                })
 
-        messages = [{
-            "role": "user",
-            "content": contents
-        }]
+            messages = [{
+                "role": "user",
+                "content": contents
+            }]
 
-        payload = {
-            "model": model,
-            "messages": messages,
-            "stream": False,
-            "n": 1,
-        }
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": False,
+                "n": 1,
+            }
 
-        # 处理图像配置（宽高比 / 分辨率）
-        image_config = self._build_image_config(model_config)
-        if image_config.get("image_aspect_ratio"):
-            payload["image_aspect_ratio"] = image_config["image_aspect_ratio"]
-        if image_config.get("image_resolution"):
-            payload["image_resolution"] = image_config["image_resolution"]
+            # 处理图像配置（宽高比 / 分辨率）
+            image_config = self._build_image_config(model_config)
+            if image_config.get("image_aspect_ratio"):
+                payload["image_aspect_ratio"] = image_config["image_aspect_ratio"]
+            if image_config.get("image_resolution"):
+                payload["image_resolution"] = image_config["image_resolution"]
 
-        # 种子可选
-        seed = model_config.get("seed")
-        if seed is not None and seed != -1:
-            payload["seed"] = seed
+            # 种子可选
+            seed = model_config.get("seed")
+            if seed is not None and seed != -1:
+                payload["seed"] = seed
 
         # 代理配置
         proxy_config = self._get_proxy_config()
@@ -86,7 +100,10 @@ class ZaiClient(BaseApiClient):
             "Authorization": authorization
         }
 
-        logger.info(f"{self.log_prefix} (Zai) 发起请求: {model}, Prompt: {full_prompt[:50]}... To: {endpoint}")
+        logger.info(
+            f"{self.log_prefix} (Zai) 发起请求: {model}, minimal_mode={minimal_mode}, "
+            f"Prompt: {full_prompt[:50]}... To: {endpoint}"
+        )
         verbose_debug = self.action.get_config("components.enable_verbose_debug", False)
         if verbose_debug:
             safe_headers = headers.copy()
