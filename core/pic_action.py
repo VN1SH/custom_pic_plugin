@@ -610,6 +610,16 @@ class Custom_Pic_Action(BaseAction):
                                 await self._schedule_auto_recall_for_recent_message(model_config)
                                 return True, f"{mode_text}已完成"
                         else:
+                            # 下载失败时兜底：直接发送URL，避免目标图床对插件服务器限流/拦截导致整体失败
+                            if isinstance(final_image_data, str) and final_image_data.startswith(("http://", "https://")):
+                                logger.warning(f"{self.log_prefix} URL下载失败，尝试直接发送URL图片: {encode_result}")
+                                direct_send_success = await self.send_image(final_image_data)
+                                if direct_send_success:
+                                    mode_text = "图生图" if is_img2img else "文生图"
+                                    if enable_debug:
+                                        await self.send_text(f"{mode_text}完成！（已使用URL直发兜底）")
+                                    await self._schedule_auto_recall_for_recent_message(model_config)
+                                    return True, f"{mode_text}已完成(URL直发)"
                             await self.send_text(f"获取到图片URL，但在处理图片时失败了：{encode_result}")
                             return False, f"图片处理失败: {encode_result}"
                     except Exception as e:

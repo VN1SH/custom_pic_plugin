@@ -239,6 +239,14 @@ class PicGenerationCommand(BaseCommand):
                                 await self.send_text("图片发送失败")
                                 return False, "图片发送失败", True
                         else:
+                            if isinstance(result, str) and result.startswith(("http://", "https://")):
+                                logger.warning(f"{self.log_prefix} 图片URL下载失败，尝试URL直发: {encode_result}")
+                                direct_send_success = await self.send_image(result)
+                                if direct_send_success:
+                                    if enable_debug:
+                                        await self.send_text(f"{style_name} 风格转换完成！（已使用URL直发兜底）")
+                                    await self._schedule_auto_recall_for_recent_message(model_config, model_id)
+                                    return True, "图生图命令执行成功(URL直发)", True
                             await self.send_text(f"图片处理失败：{encode_result}")
                             return False, f"图片处理失败: {encode_result}", True
                     except Exception as e:
@@ -381,6 +389,14 @@ class PicGenerationCommand(BaseCommand):
                                 await self.send_text("图片发送失败")
                                 return False, "图片发送失败", True
                         else:
+                            if isinstance(result, str) and result.startswith(("http://", "https://")):
+                                logger.warning(f"{self.log_prefix} 图片URL下载失败，尝试URL直发: {encode_result}")
+                                direct_send_success = await self.send_image(result)
+                                if direct_send_success:
+                                    if enable_debug:
+                                        await self.send_text(f"{mode_text}完成！（已使用URL直发兜底）")
+                                    await self._schedule_auto_recall_for_recent_message(model_config, model_id)
+                                    return True, f"{mode_text}命令执行成功(URL直发)", True
                             await self.send_text(f"图片处理失败：{encode_result}")
                             return False, f"图片处理失败: {encode_result}", True
                     except Exception as e:
