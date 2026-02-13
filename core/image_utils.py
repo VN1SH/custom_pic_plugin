@@ -222,7 +222,7 @@ class ImageProcessor:
         except (ValueError, TypeError):
             return False
 
-    def download_and_encode_base64(self, image_url: str) -> Tuple[bool, str]:
+    def download_and_encode_base64(self, image_url: str, model_config: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """下载图片或处理Base64数据URL"""
         logger.info(f"{self.log_prefix} (B64) 处理图片: {image_url[:50]}...")
         
@@ -243,16 +243,85 @@ class ImageProcessor:
             else:
                 # 处理普通HTTP URL
                 logger.info(f"{self.log_prefix} (B64) 下载HTTP图片")
-                with urllib.request.urlopen(image_url, timeout=600) as response:
-                    if response.status == 200:
-                        image_bytes = response.read()
+                import requests
+                import time
+                from urllib.parse import urlsplit
+
+                headers = {
+                    "Accept": "image/*,*/*;q=0.8",
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/132.0.0.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                }
+
+                referer = ""
+                api_key = ""
+                if isinstance(model_config, dict):
+                    referer = str(model_config.get("base_url", "") or "").strip()
+                    api_key = str(model_config.get("api_key", "") or "").strip()
+                if not referer:
+                    parsed_url = urlsplit(image_url)
+                    if parsed_url.scheme and parsed_url.netloc:
+                        referer = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+                if referer:
+                    headers["Referer"] = referer
+                    try:
+                        parsed_ref = urlsplit(referer)
+                        if parsed_ref.scheme and parsed_ref.netloc:
+                            headers["Origin"] = f"{parsed_ref.scheme}://{parsed_ref.netloc}"
+                    except Exception:
+                        pass
+                if api_key:
+                    if not api_key.lower().startswith(("bearer ", "basic ")):
+                        api_key = f"Bearer {api_key}"
+                    headers["Authorization"] = api_key
+
+                request_kwargs = {
+                    "url": image_url,
+                    "headers": headers,
+                    "timeout": 60,
+                    "allow_redirects": True
+                }
+
+                proxy_enabled = self.action.get_config("proxy.enabled", False)
+                if proxy_enabled:
+                    proxy_url = self.action.get_config("proxy.url", "http://127.0.0.1:7890")
+                    request_kwargs["proxies"] = {
+                        "http": proxy_url,
+                        "https": proxy_url
+                    }
+
+                retry_status = {403, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+                max_attempts = 3
+                for attempt in range(1, max_attempts + 1):
+                    try:
+                        response = requests.get(**request_kwargs)
+                    except Exception as req_err:
+                        if attempt >= max_attempts:
+                            return False, f"请求异常: {str(req_err)[:80]}"
+                        time.sleep(0.8 * attempt)
+                        continue
+
+                    if response.status_code == 200 and response.content:
+                        image_bytes = response.content
                         base64_encoded_image = base64.b64encode(image_bytes).decode("utf-8")
                         logger.info(f"{self.log_prefix} (B64) 图片下载编码完成. Base64长度: {len(base64_encoded_image)}")
                         return True, base64_encoded_image
-                    else:
-                        error_msg = f"下载图片失败 (状态: {response.status})"
-                        logger.error(f"{self.log_prefix} (B64) {error_msg} URL: {image_url[:30]}...")
-                        return False, error_msg
+
+                    body_preview = (response.text or "")[:120].replace("\n", " ")
+                    logger.warning(
+                        f"{self.log_prefix} (B64) 下载失败(尝试{attempt}/{max_attempts}): "
+                        f"HTTP {response.status_code}, body={body_preview}"
+                    )
+                    if response.status_code in retry_status and attempt < max_attempts:
+                        time.sleep(0.8 * attempt)
+                        continue
+                    return False, f"HTTP {response.status_code}"
+
+                return False, "下载失败(重试耗尽)"
                         
         except Exception as e:
             logger.error(f"{self.log_prefix} (B64) 处理图片时错误: {e!r}", exc_info=True)

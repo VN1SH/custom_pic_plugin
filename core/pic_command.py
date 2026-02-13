@@ -225,7 +225,7 @@ class PicGenerationCommand(BaseCommand):
                     try:
                         # 下载并转换为base64
                         encode_success, encode_result = await asyncio.to_thread(
-                            self._download_and_encode_base64, result
+                            self._download_and_encode_base64, result, model_config
                         )
                         if encode_success:
                             send_success = await self.send_image(encode_result)
@@ -367,7 +367,7 @@ class PicGenerationCommand(BaseCommand):
                     try:
                         # 下载并转换为base64
                         encode_success, encode_result = await asyncio.to_thread(
-                            self._download_and_encode_base64, result
+                            self._download_and_encode_base64, result, model_config
                         )
                         if encode_success:
                             send_success = await self.send_image(encode_result)
@@ -488,17 +488,54 @@ class PicGenerationCommand(BaseCommand):
             return None
 
 
-    def _download_and_encode_base64(self, image_url: str) -> Tuple[bool, str]:
+    def _download_and_encode_base64(self, image_url: str, model_config: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """下载图片并转换为base64编码"""
         try:
             import requests
             import base64
+            import time
+            from urllib.parse import urlsplit
 
             # 获取代理配置
             proxy_enabled = self.get_config("proxy.enabled", False)
+            headers = {
+                "Accept": "image/*,*/*;q=0.8",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/132.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
+
+            # 尝试补充 Referer / Authorization，兼容部分文件网关策略
+            referer = ""
+            api_key = ""
+            if isinstance(model_config, dict):
+                referer = str(model_config.get("base_url", "") or "").strip()
+                api_key = str(model_config.get("api_key", "") or "").strip()
+            if not referer:
+                parsed_url = urlsplit(image_url)
+                if parsed_url.scheme and parsed_url.netloc:
+                    referer = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+            if referer:
+                headers["Referer"] = referer
+                try:
+                    parsed_ref = urlsplit(referer)
+                    if parsed_ref.scheme and parsed_ref.netloc:
+                        headers["Origin"] = f"{parsed_ref.scheme}://{parsed_ref.netloc}"
+                except Exception:
+                    pass
+            if api_key:
+                if not api_key.lower().startswith(("bearer ", "basic ")):
+                    api_key = f"Bearer {api_key}"
+                headers["Authorization"] = api_key
+
             request_kwargs = {
                 "url": image_url,
-                "timeout": 30
+                "timeout": 30,
+                "headers": headers,
+                "allow_redirects": True
             }
 
             if proxy_enabled:
@@ -509,12 +546,32 @@ class PicGenerationCommand(BaseCommand):
                 }
                 logger.info(f"{self.log_prefix} 下载图片使用代理: {proxy_url}")
 
-            response = requests.get(**request_kwargs)
-            if response.status_code == 200:
-                image_base64 = base64.b64encode(response.content).decode('utf-8')
-                return True, image_base64
-            else:
+            retry_status = {403, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    response = requests.get(**request_kwargs)
+                except Exception as req_err:
+                    if attempt >= max_attempts:
+                        return False, f"请求异常: {str(req_err)[:80]}"
+                    time.sleep(0.8 * attempt)
+                    continue
+
+                if response.status_code == 200 and response.content:
+                    image_base64 = base64.b64encode(response.content).decode('utf-8')
+                    return True, image_base64
+
+                body_preview = (response.text or "")[:120].replace("\n", " ")
+                logger.warning(
+                    f"{self.log_prefix} 下载图片失败(尝试{attempt}/{max_attempts}): "
+                    f"HTTP {response.status_code}, body={body_preview}"
+                )
+                if response.status_code in retry_status and attempt < max_attempts:
+                    time.sleep(0.8 * attempt)
+                    continue
                 return False, f"HTTP {response.status_code}"
+
+            return False, "下载失败(重试耗尽)"
         except Exception as e:
             return False, str(e)
 

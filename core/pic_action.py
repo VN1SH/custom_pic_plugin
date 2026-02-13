@@ -596,7 +596,7 @@ class Custom_Pic_Action(BaseAction):
                 else:  # URL
                     try:
                         encode_success, encode_result = await asyncio.to_thread(
-                            self.image_processor.download_and_encode_base64, final_image_data
+                            self.image_processor.download_and_encode_base64, final_image_data, model_config
                         )
                         if encode_success:
                             send_success = await self.send_image(encode_result)
